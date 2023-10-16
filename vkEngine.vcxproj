@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="audio\audio.h" />
+    <ClInclude Include="camera\camera.h" />
+    <ClInclude Include="font\font.h" />
+    <ClInclude Include="image\image.h" />
+    <ClInclude Include="math\math.h" />
+    <ClInclude Include="model\bmodel.h" />
+    <ClInclude Include="network\network.h" />
+    <ClInclude Include="particle\particle.h" />
+    <ClInclude Include="perframe.h" />
+    <ClInclude Include="physics\physics.h" />
+    <ClInclude Include="system\system.h" />
+    <ClInclude Include="threads\threads.h" />
+    <ClInclude Include="ui\ui.h" />
+    <ClInclude Include="utils\event.h" />
+    <ClInclude Include="utils\genid.h" />
+    <ClInclude Include="utils\input.h" />
+    <ClInclude Include="utils\list.h" />
+    <ClInclude Include="utils\memzone.h" />
+    <ClInclude Include="vr\vr.h" />
+    <ClInclude Include="vulkan\vulkan.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="audio\audio.c" />
+    <ClCompile Include="audio\hrir.c" />
+    <ClCompile Include="audio\wave.c" />
+    <ClCompile Include="camera\camera.c" />
+    <ClCompile Include="engine.c" />
+    <ClCompile Include="font\font.c" />
+    <ClCompile Include="image\image.c" />
+    <ClCompile Include="image\qoi.c" />
+    <ClCompile Include="image\tga.c" />
+    <ClCompile Include="math\math.c" />
+    <ClCompile Include="math\matrix.c" />
+    <ClCompile Include="math\quat.c" />
+    <ClCompile Include="math\vec2.c" />
+    <ClCompile Include="math\vec3.c" />
+    <ClCompile Include="math\vec4.c" />
+    <ClCompile Include="model\bmodel.c" />
+    <ClCompile Include="network\network.c" />
+    <ClCompile Include="particle\particle.c" />
+    <ClCompile Include="perframe.c" />
+    <ClCompile Include="physics\physics.c" />
+    <ClCompile Include="system\win32.c" />
+    <ClCompile Include="threads\threads.c" />
+    <ClCompile Include="ui\bargraph.c" />
+    <ClCompile Include="ui\button.c" />
+    <ClCompile Include="ui\checkbox.c" />
+    <ClCompile Include="ui\cursor.c" />
+    <ClCompile Include="ui\sprite.c" />
+    <ClCompile Include="ui\ui.c" />
+    <ClCompile Include="utils\event.c" />
+    <ClCompile Include="utils\genid.c" />
+    <ClCompile Include="utils\input.c" />
+    <ClCompile Include="utils\list.c" />
+    <ClCompile Include="utils\memzone.c" />
+    <ClCompile Include="vr\vr.c" />
+    <ClCompile Include="vulkan\vulkan_buffer.c" />
+    <ClCompile Include="vulkan\vulkan_context.c" />
+    <ClCompile Include="vulkan\vulkan_descriptorset.c" />
+    <ClCompile Include="vulkan\vulkan_framebuffer.c" />
+    <ClCompile Include="vulkan\vulkan_instance.c" />
+    <ClCompile Include="vulkan\vulkan_mem.c" />
+    <ClCompile Include="vulkan\vulkan_pipeline.c" />
+    <ClCompile Include="vulkan\vulkan_renderpass.c" />
+    <ClCompile Include="vulkan\vulkan_swapchain.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <GLSL Include="shaders\font.frag" />
+    <GLSL Include="shaders\font.vert" />
+    <GLSL Include="shaders\ui_sdf.frag" />
+    <GLSL Include="shaders\ui_sdf.vert" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{7191da50-a977-4313-9440-16a262bc6a9a}</ProjectGuid>
+    <RootNamespace>vkEngine</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>NotSet</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>$(VULKAN_SDK)\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(VULKAN_SDK)\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);</IncludePath>
+    <LibraryPath>$(VULKAN_SDK)\lib;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgAutoLink>false</VcpkgAutoLink>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>TRACY_ENABLE;_CRT_SECURE_NO_WARNINGS;_DEBUG;_CONSOLE;WIN32;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <Optimization>Disabled</Optimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>openvr_api.lib;portaudio.lib;pthreadVC3d.lib;vulkan-1.lib;ws2_32.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>TRACY_ENABLE;_CRT_SECURE_NO_WARNINGS;NDEBUG;_CONSOLE;WIN32;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <Optimization>MaxSpeed</Optimization>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>openvr_api.lib;portaudio.lib;pthreadVC3.lib;vulkan-1.lib;ws2_32.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="glsl.targets" />
+  </ImportGroup>
+</Project>

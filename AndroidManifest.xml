@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+		  package="org.NitroGL.vkUITest">
+	<uses-sdk android:minSdkVersion="28"
+			  android:targetSdkVersion="28"/>
+    <application android:debuggable="true"
+				 android:hasCode="false"
+				 android:label="vkUITest">
+        <activity android:configChanges="screenSize|orientation|keyboardHidden"
+				  android:label="vkUITest"
+				  android:name="android.app.NativeActivity">
+            <meta-data android:name="android.app.lib_name" android:value="vkUITest"/>
+            <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+        </activity>
+    </application>
+</manifest>

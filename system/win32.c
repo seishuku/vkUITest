@@ -442,7 +442,7 @@ int main(int argc, char **argv)
 	}
 
 	DBGPRINTF(DEBUG_INFO, "Creating swapchain...\n");
-	vkuCreateSwapchain(&Context, &Swapchain, Width, Height, VK_TRUE);
+	vkuCreateSwapchain(&Context, &Swapchain, VK_TRUE);
 
 	DBGPRINTF(DEBUG_INFO, "Initalizing Vulkan resources...\n");
 	if(!Init())

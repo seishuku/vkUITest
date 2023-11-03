@@ -24,7 +24,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 	else
 		DBGPRINTF(DEBUG_WARNING, "\n%s\n", pCallbackData->pMessage);
 
- 	return VK_FALSE;
+	return VK_FALSE;
 }
 #endif
 
@@ -42,7 +42,7 @@ VkBool32 CreateVulkanContext(VkInstance Instance, VkuContext_t *Context)
 		DBGPRINTF(DEBUG_ERROR, "vkCreateWin32SurfaceKHR failed.\n");
 		return VK_FALSE;
 	}
-#else
+#elif LINUX
 	if(vkCreateXlibSurfaceKHR(Instance, &(VkXlibSurfaceCreateInfoKHR)
 	{
 		.sType=VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR,
@@ -53,11 +53,28 @@ VkBool32 CreateVulkanContext(VkInstance Instance, VkuContext_t *Context)
 		DBGPRINTF("vkCreateXlibSurfaceKHR failed.\n");
 		return VK_FALSE;
 	}
+#elif ANDROID
+	if(vkCreateAndroidSurfaceKHR(Instance, &(VkAndroidSurfaceCreateInfoKHR)
+	{
+		.sType=VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
+		.pNext=NULL,
+		.flags=0,
+		.window=Context->Win,
+	}, VK_NULL_HANDLE, &Context->Surface)!=VK_SUCCESS)
+	{
+		DBGPRINTF("vkCreateAndroidSurfaceKHR failed.\n");
+		return VK_FALSE;
+	}
 #endif
-
 	// Get the number of physical devices in the system
 	uint32_t PhysicalDeviceCount=0;
 	vkEnumeratePhysicalDevices(Instance, &PhysicalDeviceCount, VK_NULL_HANDLE);
+
+	if(!PhysicalDeviceCount)
+	{
+		DBGPRINTF(DEBUG_ERROR, "No physical devices found.\n");
+		return VK_FALSE;
+	}
 
 	// Allocate an array of handles
 	VkPhysicalDevice *DeviceHandles=(VkPhysicalDevice *)Zone_Malloc(Zone, sizeof(VkPhysicalDevice)*PhysicalDeviceCount);
@@ -133,7 +150,6 @@ VkBool32 CreateVulkanContext(VkInstance Instance, VkuContext_t *Context)
 	Zone_Free(Zone, QueueIndices);
 
 	uint32_t ExtensionCount=0;
-
 	vkEnumerateDeviceExtensionProperties(Context->PhysicalDevice, VK_NULL_HANDLE, &ExtensionCount, VK_NULL_HANDLE);
 
 	VkExtensionProperties *ExtensionProperties=(VkExtensionProperties *)Zone_Malloc(Zone, sizeof(VkExtensionProperties)*ExtensionCount);
@@ -147,16 +163,20 @@ VkBool32 CreateVulkanContext(VkInstance Instance, VkuContext_t *Context)
 
 	vkEnumerateDeviceExtensionProperties(Context->PhysicalDevice, VK_NULL_HANDLE, &ExtensionCount, ExtensionProperties);
 
-	VkBool32 SwapchainExtension=VK_FALSE;
-	VkBool32 PushDescriptorExtension=VK_FALSE;
-	VkBool32 DynamicRenderingExtension=VK_FALSE;
+	//DBGPRINTF(DEBUG_INFO, "Device extensions:\n");
+	//for(uint32_t i=0;i<ExtensionCount;i++)
+	//	DBGPRINTF(DEBUG_INFO, "\t%s\n", ExtensionProperties[i].extensionName);
+
+	Context->SwapchainExtension=VK_FALSE;
+	Context->PushDescriptorExtension=VK_FALSE;
+	Context->DynamicRenderingExtension=VK_FALSE;
 
 	for(uint32_t i=0;i<ExtensionCount;i++)
 	{
 		if(strcmp(ExtensionProperties[i].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME)==0)
 		{
 			DBGPRINTF(DEBUG_INFO, VK_KHR_SWAPCHAIN_EXTENSION_NAME" extension is supported!\n");
-			SwapchainExtension=VK_TRUE;
+			Context->SwapchainExtension=VK_TRUE;
 		}
 		else if(strcmp(ExtensionProperties[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)==0)
 		{
@@ -165,19 +185,19 @@ VkBool32 CreateVulkanContext(VkInstance Instance, VkuContext_t *Context)
 			else
 			{
 				DBGPRINTF(DEBUG_INFO, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME" extension is supported!\n");
-				PushDescriptorExtension=VK_TRUE;
+				Context->PushDescriptorExtension=VK_TRUE;
 			}
 		}
 		else if(strcmp(ExtensionProperties[i].extensionName, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)==0)
 		{
 			DBGPRINTF(DEBUG_INFO, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME" extension is supported!\n");
-			DynamicRenderingExtension=VK_TRUE;
+			Context->DynamicRenderingExtension=VK_TRUE;
 		}
 	}
 
 	Zone_Free(Zone, ExtensionProperties);
 
-	if(!SwapchainExtension)
+	if(!Context->SwapchainExtension)
 	{
 		DBGPRINTF(DEBUG_ERROR, "Missing required device extensions!\n");
 		return VK_FALSE;
@@ -253,69 +273,16 @@ VkBool32 CreateVulkanContext(VkInstance Instance, VkuContext_t *Context)
 	// Get device queue
 	vkGetDeviceQueue(Context->Device, Context->QueueFamilyIndex, 0, &Context->Queue);
 
-	FILE *Stream=fopen("pipelinecache.bin", "rb");
-
-	if(Stream)
-	{
-		DBGPRINTF(DEBUG_INFO, "Reading pipeline cache data...\n");
-
-		fseek(Stream, 0, SEEK_END);
-		size_t PipelineCacheSize=ftell(Stream);
-		fseek(Stream, 0, SEEK_SET);
-
-		uint8_t *PipelineCacheData=(uint8_t *)Zone_Malloc(Zone, PipelineCacheSize);
-
-		if(PipelineCacheData)
-		{
-			VkResult Result=vkCreatePipelineCache(Context->Device, &(VkPipelineCacheCreateInfo)
-			{
-				.sType=VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
-				.initialDataSize=PipelineCacheSize,
-				.pInitialData=PipelineCacheData,
-			}, VK_NULL_HANDLE, &Context->PipelineCache);
-
-			if(Result!=VK_SUCCESS)
-			{
-				DBGPRINTF(DEBUG_ERROR, "Corrupted pipeline cache data, creating new. (Result=%d)\n", Result);
-
-				vkCreatePipelineCache(Context->Device, &(VkPipelineCacheCreateInfo)
-				{
-					.sType=VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
-				}, VK_NULL_HANDLE, &Context->PipelineCache);
-			}
-
-			Zone_Free(Zone, PipelineCacheData);
-		}
-		else
-		{
-			DBGPRINTF(DEBUG_ERROR, "Failed to allocate memory for pipeline cache data, creating new pipeline cache.\n");
-
-			vkCreatePipelineCache(Context->Device, &(VkPipelineCacheCreateInfo)
-			{
-				.sType=VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
-			}, VK_NULL_HANDLE, &Context->PipelineCache);
-		}
-	}
-	else
-	{
-		DBGPRINTF(DEBUG_INFO, "No pipeline cache data file found, creating new.\n");
-
-		vkCreatePipelineCache(Context->Device, &(VkPipelineCacheCreateInfo)
-		{
-			.sType=VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
-		}, VK_NULL_HANDLE, &Context->PipelineCache);
-	}
-
 	// Create a general command pool
 	vkCreateCommandPool(Context->Device, &(VkCommandPoolCreateInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		.flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+		.flags=0,
 		.queueFamilyIndex=Context->QueueFamilyIndex,
 	}, VK_NULL_HANDLE, &Context->CommandPool);
 
 #ifdef _DEBUG
-	if(vkCreateDebugUtilsMessengerEXT(Instance, &(VkDebugUtilsMessengerCreateInfoEXT)
+	if(vkCreateDebugUtilsMessengerEXT&&vkCreateDebugUtilsMessengerEXT(Instance, &(VkDebugUtilsMessengerCreateInfoEXT)
 	{
 		.sType=VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 		.messageSeverity=VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
@@ -347,6 +314,7 @@ void DestroyVulkan(VkInstance Instance, VkuContext_t *Context)
 	vkDestroySurfaceKHR(Instance, Context->Surface, VK_NULL_HANDLE);
 
 #ifdef _DEBUG
-	vkDestroyDebugUtilsMessengerEXT(Instance, debugMessenger, VK_NULL_HANDLE);
+	if(vkDestroyDebugUtilsMessengerEXT)
+		vkDestroyDebugUtilsMessengerEXT(Instance, debugMessenger, VK_NULL_HANDLE);
 #endif
 }

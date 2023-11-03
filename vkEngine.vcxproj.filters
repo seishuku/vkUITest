@@ -269,9 +269,6 @@
     <ClCompile Include="particle\particle.c">
       <Filter>Source Files\particle</Filter>
     </ClCompile>
-    <ClCompile Include="engine.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="perframe.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -298,6 +295,9 @@
     </ClCompile>
     <ClCompile Include="ui\cursor.c">
       <Filter>Source Files\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="engine.c">
+      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

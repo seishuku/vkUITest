@@ -74,7 +74,7 @@ SHADERS+=shaders/font.vert.spv
 SHADERS+=shaders/ui_sdf.frag.spv
 SHADERS+=shaders/ui_sdf.vert.spv
 
-CFLAGS=-Wall -Wno-missing-braces -Wextra -O3 -std=gnu17 -march=skylake
+CFLAGS=-Wall -Wno-missing-braces -Wextra -O3 -std=gnu17
 LDFLAGS=-Wold-style-definition -lm -lpthread -lopenvr_api -lportaudio
 
 ifeq ($(OS),Windows_NT)
@@ -83,7 +83,7 @@ ifeq ($(OS),Windows_NT)
 	LDFLAGS+=-lvulkan-1 -lws2_32 -lgdi32
 else
 	CC=gcc
-	CFLAGS+=-I/usr/X11/include
+	CFLAGS+=-I/usr/X11/include -DLINUX
 	LDFLAGS+=-lvulkan -lX11 -lXi -lXfixes -L/usr/X11/lib
 endif
 

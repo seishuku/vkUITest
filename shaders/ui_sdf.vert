@@ -13,8 +13,7 @@ layout (push_constant) uniform ubo {
 layout (location=0) out vec2 UV;					// Output coords
 layout (location=1) out flat vec4 Color;			// Control color
 layout (location=2) out flat uint Type;				// Control type
-layout (location=3) out flat uint DescriptorIndex;	// Control descriptor set index
-layout (location=4) out flat vec2 Size;				// Control size
+layout (location=3) out flat vec2 Size;				// Control size
 
 const uint UI_CONTROL_BUTTON=0;
 const uint UI_CONTROL_CHECKBOX=1;
@@ -48,9 +47,6 @@ void main()
 
 	// Pass type
 	Type=InstanceType.x;
-
-	// Pass descriptor index
-	DescriptorIndex=InstanceType.y;
 
 	// Pass size
 	Size=InstancePos.zw;

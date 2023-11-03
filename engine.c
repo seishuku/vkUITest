@@ -17,7 +17,7 @@
 #include "utils/input.h"
 #include "particle/particle.h"
 #include "threads/threads.h"
-#include "vr/vr.h"
+//#include "vr/vr.h"
 #include "font/font.h"
 #include "audio/audio.h"
 #include "physics/physics.h"
@@ -44,11 +44,16 @@ extern float fps, fTimeStep, fTime;
 VkuSwapchain_t Swapchain;
 
 // Depth buffer image and format
-VkFormat DepthFormat=VK_FORMAT_D32_SFLOAT_S8_UINT;
+VkFormat DepthFormat;
 VkuImage_t DepthImage;
 
 VkRenderPass RenderPass;
 
+VkuImage_t FaceTexture;
+
+Sample_t Explode;
+
+Font_t Fnt; // Fnt instead of Font, because Xlib is dumb and declares a type Font *rolley-eyes*
 UI_t UI;
 
 uint32_t CursorID=UINT32_MAX;
@@ -63,6 +68,7 @@ uint32_t Color4ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
 uint32_t ColorMapID=UINT32_MAX;
 
 uint32_t SpriteID=UINT32_MAX;
+uint32_t FaceID=UINT32_MAX;
 
 VkuBuffer_t FireStagingBuffer;
 VkuImage_t FireImage;
@@ -149,6 +155,30 @@ void RecreateSwapchain(void);
 // Create functions for creating render data for asteroids
 bool CreateFramebuffers(uint32_t targetWidth, uint32_t targetHeight)
 {
+	VkImageFormatProperties imageFormatProps;
+	VkResult Result;
+
+	DepthFormat=VK_FORMAT_D32_SFLOAT_S8_UINT;
+	Result=vkGetPhysicalDeviceImageFormatProperties(Context.PhysicalDevice,
+															 DepthFormat,
+															 VK_IMAGE_TYPE_2D,
+															 VK_IMAGE_TILING_OPTIMAL,
+															 VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+															 0,
+															 &imageFormatProps);
+
+	if(Result!=VK_SUCCESS)
+	{
+		DepthFormat=VK_FORMAT_D24_UNORM_S8_UINT;
+		Result=vkGetPhysicalDeviceImageFormatProperties(Context.PhysicalDevice, DepthFormat, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &imageFormatProps);
+
+		if(Result!=VK_SUCCESS)
+		{
+			DBGPRINTF(DEBUG_ERROR, "CreateFramebuffers: No suitable depth format found.\n");
+			return false;
+		}
+	}
+
 	vkuCreateTexture2D(&Context, &DepthImage, targetWidth, targetHeight, DepthFormat, VK_SAMPLE_COUNT_1_BIT);
 
 	VkCommandBuffer CommandBuffer=vkuOneShotCommandBufferBegin(&Context);
@@ -221,10 +251,12 @@ bool CreateFramebuffers(uint32_t targetWidth, uint32_t targetHeight)
 // Render call from system main event loop
 void Render(void)
 {
-	static double fireTime=0.0;
-	const double OneOver60=1.0/60.0;
+	static float fireTime=0.0f;
+	const float OneOver60=1.0f/60.0f;
 	static uint32_t Index=0;
 	uint32_t imageIndex;
+
+	UI_UpdateSpritePosition(&UI, FaceID, Vec2(sinf(fTime*4.0f)*50.0f+(Width/2), cosf(fTime*4.0f)*50.0f+(Height/2)));
 
 	VkResult Result=vkAcquireNextImageKHR(Context.Device, Swapchain.Swapchain, UINT64_MAX, PerFrame[Index].PresentCompleteSemaphore, VK_NULL_HANDLE, &imageIndex);
 
@@ -269,13 +301,27 @@ void Render(void)
 		.renderArea.extent=Swapchain.Extent,
 	}, VK_SUBPASS_CONTENTS_INLINE);
 
-	vkCmdSetViewport(PerFrame[Index].CommandBuffer, 0, 1, &(VkViewport) { 0.0f, 0, (float)Swapchain.Extent.width, (float)Swapchain.Extent.height, 0.0f, 1.0f });
-	vkCmdSetScissor(PerFrame[Index].CommandBuffer, 0, 1, &(VkRect2D) { { 0, 0 }, Swapchain.Extent});
+	const VkViewport Viewport={
+		.x=0.0f,
+		.y=0.0f,
+		.width=(float)Swapchain.Extent.width,
+		.height=(float)Swapchain.Extent.height,
+		.minDepth=0.0f,
+		.maxDepth=1.0f,
+	};
+	const VkRect2D Scissor={
+		.offset.x=0,
+		.offset.y=0,
+		.extent=Swapchain.Extent,
+	};
+
+	vkCmdSetViewport(PerFrame[Index].CommandBuffer, 0, 1, &Viewport);
+	vkCmdSetScissor(PerFrame[Index].CommandBuffer, 0, 1, &Scissor);
 
 	UI_Draw(&UI, Index);
 
-	Font_Print(16.0f, 0.0f, 0.0f, "FPS: %0.1f\n\x1B[91mFrame time: %0.5fms", fps, fTimeStep*1000.0f);
-	Font_Draw(Index);
+	Font_Print(&Fnt, 32.0f, 0.0f, 0.0f, "FPS: %0.1f\n\x1B[91mFrame time: %0.5fms", fps, fTimeStep*1000.0f);
+	Font_Draw(&Fnt, Index);
 
 	vkCmdEndRenderPass(PerFrame[Index].CommandBuffer);
 
@@ -320,6 +366,11 @@ void ExitButton(void *arg)
 	Done=true;
 }
 
+void ExplodeButton(void *arg)
+{
+	Audio_PlaySample(&Explode, false, 1.0f, NULL);
+}
+
 // Initialization call from system main
 bool Init(void)
 {
@@ -328,6 +379,12 @@ bool Init(void)
 	Event_Add(EVENT_MOUSEDOWN, Event_MouseDown);
 	Event_Add(EVENT_MOUSEUP, Event_MouseUp);
 	Event_Add(EVENT_MOUSEMOVE, Event_Mouse);
+
+	if(!Audio_Init())
+		return false;
+
+	if(!Audio_LoadStatic("assets/explode.wav", &Explode))
+		return false;
 
 	VkZone=vkuMem_Init(&Context, (size_t)(Context.DeviceProperties2.maxMemoryAllocationSize*0.8f));
 
@@ -402,11 +459,18 @@ bool Init(void)
 		}, &PerFrame[i].CommandBuffer);
 	}
 
+	Image_Upload(&Context, &FaceTexture, "assets/face.tga", IMAGE_BILINEAR);
+
+	Font_Init(&Fnt);
+
 	UI_Init(&UI, Vec2(0.0f, 0.0f), Vec2((float)Width, (float)Height));
 
-	SpriteID=UI_AddSprite(&UI, Vec2((float)Width/2.0f, (float)Height/2.0f), UI.Size, Vec3(1.0f, 1.0f, 1.0f), &FireImage, 0.0f);
+	SpriteID=UI_AddSprite(&UI, Vec2((float)Width/2.0f, (float)Height/2.0f), Vec2(FIRE_WIDTH, FIRE_HEIGHT), Vec3(1.0f, 1.0f, 1.0f), &FireImage, 0.0f);
 
-	UI_AddButton(&UI, Vec2((float)Width-200.0f, 100.0f), Vec2(100.0f, 100.0f), Vec3(0.5f, 0.5f, 0.5f), "Exit", ExitButton);
+	FaceID=UI_AddSprite(&UI, Vec2((float)Width/2.0f, (float)Height/2.0f), Vec2(128.0f, 128.0f), Vec3(1.0f, 1.0f, 1.0f), &FaceTexture, 0.0f);
+
+	UI_AddButton(&UI, Vec2((float)Width-200.0f, 100.0f), Vec2(100.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), "Exit", ExitButton);
+	UI_AddButton(&UI, Vec2((float)Width-200.0f, 400.0f), Vec2(100.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), "Explode", ExplodeButton);
 
 	SliderID=UI_AddBarGraph(&UI, Vec2((float)Width-400.0f, (float)Height-50.0f), Vec2(400.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), "Fire", false, 0.4f, 0.0f, 0.0f);
 
@@ -429,7 +493,7 @@ bool Init(void)
 	ColorMapID=UI_AddCheckBox(&UI, Vec2((float)Width-375.0f, (float)Height-75.0f), 25.0f, Vec3(0.5f, 0.5f, 0.5f), "Color mapping", true);
 
 	// Cursor has to be last, otherwise layer order will obstruct it
-	CursorID=UI_AddCursor(&UI, Vec2(0.0f, 0.0f), 16.0f, Vec3(1.0f, 1.0f, 1.0f));
+	CursorID=UI_AddCursor(&UI, Vec2(0.0f, 0.0f), 16.0, Vec3(1.0f, 1.0f, 1.0f));
 
 	return true;
 }
@@ -439,11 +503,6 @@ void RecreateSwapchain(void)
 {
 	if(Context.Device!=VK_NULL_HANDLE) // Windows quirk, WM_SIZE is signaled on window creation, *before* Vulkan get initalized
 	{
-		UI.Size.x=(float)Width;
-		UI.Size.y=(float)Height;
-
-		UI_UpdateSpriteSize(&UI, SpriteID, UI.Size);
-
 		// Wait for the device to complete any pending work
 		vkDeviceWaitIdle(Context.Device);
 
@@ -463,7 +522,12 @@ void RecreateSwapchain(void)
 		vkuDestroySwapchain(&Context, &Swapchain);
 
 		// Recreate the swapchain
-		vkuCreateSwapchain(&Context, &Swapchain, Width, Height, VK_TRUE);
+		vkuCreateSwapchain(&Context, &Swapchain, VK_TRUE);
+
+		Width=Swapchain.Extent.width;
+		Height=Swapchain.Extent.height;
+		UI.Size.x=(float)Width;
+		UI.Size.y=(float)Height;
 
 		// Recreate the framebuffer
 		CreateFramebuffers(Width, Height);
@@ -475,11 +539,17 @@ void Destroy(void)
 {
 	vkDeviceWaitIdle(Context.Device);
 
+	Audio_Destroy();
+
+	Zone_Free(Zone, Explode.data);
+
 	UI_Destroy(&UI);
-	Font_Destroy();
+	Font_Destroy(&Fnt);
 
 	vkuDestroyBuffer(&Context, &FireStagingBuffer);
 	vkuDestroyImageBuffer(&Context, &FireImage);
+
+	vkuDestroyImageBuffer(&Context, &FaceTexture);
 
 	vkDestroyRenderPass(Context.Device, RenderPass, VK_NULL_HANDLE);
 

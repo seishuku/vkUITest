@@ -61,7 +61,6 @@ typedef struct
 		// Sprite type
 		struct
 		{
-			uint32_t DescriptorSetOffset;
 			VkuImage_t *Image;
 			vec2 Size;
 			float Rotation;
@@ -84,14 +83,14 @@ typedef struct
 	VkPipelineLayout PipelineLayout;
 	VkuPipeline_t Pipeline;
 
+	VkuImage_t BlankImage;
+
 	VkuBuffer_t VertexBuffer;
 
 	VkuBuffer_t InstanceBuffer;
 	void *InstanceBufferPtr;
 
-	VkDescriptorPool DescriptorPool;
-	VkDescriptorSetLayout DescriptorSetLayout;
-	List_t DescriptorSets;
+	VkuDescriptorSet_t DescriptorSet;
 
 	// Base ID for generating IDs
 	uint32_t IDBase;

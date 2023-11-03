@@ -1,14 +1,12 @@
 // SDF
 #version 450
-#extension GL_EXT_nonuniform_qualifier : enable
 
 layout (location=0) in vec2 UV;
 layout (location=1) in flat vec4 Color;
 layout (location=2) in flat uint Type;
-layout (location=3) in flat uint DescriptorIndex;
-layout (location=4) in flat vec2 Size;
+layout (location=3) in flat vec2 Size;
 
-layout (set=0, binding=0) uniform sampler2D Texture[];
+layout (binding=0) uniform sampler2D Texture;
 
 layout (location=0) out vec4 Output;
 
@@ -22,10 +20,10 @@ const uint UI_CONTROL_BARGRAPH=2;
 const uint UI_CONTROL_SPRITE=3;
 const uint UI_CONTROL_CURSOR=4;
 
-vec2 rotate(vec2 v, float a)
+mat2 rotate(float a)
 {
-	float s=sin(a), c=cos(a);
-	return mat2(c, s, -s, c)*v;
+	float s=sin(a*0.017453292223), c=cos(a*0.017453292223);
+	return mat2(c, s, -s, c);
 }
 
 float sdCircle(in vec2 p, in float r) 
@@ -58,7 +56,7 @@ float sdLine(vec2 p, vec2 a, vec2 b)
 
 float sdfDistance(float dist)
 {
-	float weight=0.005;
+	float weight=0.01;
 	float px=fwidth(dist);
 	return 1-smoothstep(weight-px, weight+px, dist);
 }
@@ -74,11 +72,14 @@ void main()
 	{
 		case UI_CONTROL_BUTTON:
 		{
-			float ring=sdfDistance(sdRoundedRect(uv, aspect, corner_radius));
-			float shadow=sdfDistance(abs(sdRoundedRect(uv+vec2(-0.02, 0.02), aspect-0.04, corner_radius-0.02))-0.04);
+			float dist_ring=sdRoundedRect(uv-vec2(0.02), aspect-0.04, corner_radius);
+			float ring=sdfDistance(dist_ring);
 
-			vec3 outer=(Color.xyz*ring)-(Color.xyz*0.25*shadow);
-			float outer_alpha=clamp(shadow+ring, 0.0, 1.0);
+			float dist_shadow=sdRoundedRect(uv+vec2(0.02), aspect-0.04, corner_radius);
+			float shadow=sdfDistance(dist_shadow);
+
+			vec3 outer=mix(vec3(0.25)*shadow, vec3(1.0)*ring, 0.5);
+			float outer_alpha=sdfDistance(min(dist_ring, dist_shadow));
 
 			Output=vec4(outer, outer_alpha);
 			return;
@@ -130,15 +131,13 @@ void main()
 
 		case UI_CONTROL_SPRITE:
 		{
-			Output=texture(Texture[DescriptorIndex], vec2(UV.x, -UV.y)*0.5+0.5);
+			Output=texture(Texture, vec2(UV.x, -UV.y)*0.5+0.5);
 			return;
 		}
 
 		case UI_CONTROL_CURSOR:
 		{
-			vec2 p=vec2(uv.x, uv.y);
-
-			Output=vec4(Color.xyz, sdfDistance(sdIsoscelesTriangle(rotate(p+vec2(0.99, -0.99), -0.279253), vec2(0.6, -1.9))));
+			Output=vec4(Color.xyz, sdfDistance(sdIsoscelesTriangle(rotate(-16.0)*(uv+vec2(0.99, -0.99)), vec2(0.6, -1.9))));
 			return;
 		}
 

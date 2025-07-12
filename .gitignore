@@ -3,7 +3,13 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
-# GCC objects
+# apk
+*.apk
+
+# android signing signature?
+*.idsig
+
+# code objects
 *.o
 
 #vscode user-specific files
@@ -31,7 +37,6 @@ apk/
 [Rr]eleases/
 x64/
 x86/
-[Ww][Ii][Nn]32/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 bld/

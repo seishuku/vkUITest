@@ -2,29 +2,51 @@
 #define __PHYSICS_H__
 
 #include "../math/math.h"
-#include "../camera/camera.h"
-#include "../particle/particle.h"
 
 // Define constants
 #define WORLD_SCALE 1000.0f
 #define EXPLOSION_POWER (50.0f*WORLD_SCALE)
 
-typedef struct
+typedef enum
 {
-	vec3 Position;
-	vec3 Velocity;
-	vec3 Force;
-	float Mass, invMass;
+	RIGIDBODY_OBB=0,
+	RIGIDBODY_SPHERE,
+	MAX_RIGIDBODYTYPE
+} RigidBodyType_e;
 
-	float Radius;	// radius if it's a sphere
-	vec3 Size;		// bounding box if it's an AABB
+typedef struct RigidBody_s
+{
+	vec3 position;
+	vec3 velocity;
+	vec3 force;
+	float mass, invMass;
+
+	vec4 orientation;
+	vec3 angularVelocity;
+	float inertia, invInertia;
+
+	RigidBodyType_e type;	// OBB or sphere
+	union
+	{
+		float radius;
+		vec3 size;				// OBB dimensions or radius
+	};
 } RigidBody_t;
 
-void PhysicsIntegrate(RigidBody_t *body, float dt);
-void PhysicsExplode(RigidBody_t *bodies);
-void PhysicsSphereToSphereCollisionResponse(RigidBody_t *a, RigidBody_t *b);
-void PhysicsCameraToSphereCollisionResponse(Camera_t *Camera, RigidBody_t *Body);
-void PhysicsCameraToCameraCollisionResponse(Camera_t *CameraA, Camera_t *CameraB);
-void PhysicsParticleToSphereCollisionResponse(Particle_t *Particle, RigidBody_t *Body);
+void PhysicsIntegrate(RigidBody_t *body, const float dt);
+void PhysicsExplode(RigidBody_t *body);
+float PhysicsCollisionResponse(RigidBody_t *a, RigidBody_t *b);
+
+typedef struct
+{
+	vec3 position;
+	vec3 velocity;
+	float stiffness;
+	float damping;
+	float length;
+	float mass, invMass;
+} Spring_t;
+
+void SpringIntegrate(Spring_t *spring, vec3 target, float dt);
 
 #endif

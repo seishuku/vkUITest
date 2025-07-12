@@ -6,21 +6,21 @@
 
 typedef struct
 {
-	VkFramebuffer FrameBuffer;
+	VkFramebuffer frameBuffer;
 
 	// Descriptor pool
-	VkDescriptorPool DescriptorPool;
+	VkDescriptorPool descriptorPool;
 
 	// Command buffer
-	VkCommandPool CommandPool;
-	VkCommandBuffer CommandBuffer;
+	VkCommandPool commandPool;
+	VkCommandBuffer commandBuffer;
 
 	// Fences/semaphores
-	VkFence FrameFence;
-	VkSemaphore PresentCompleteSemaphore;
-	VkSemaphore RenderCompleteSemaphore;
+	VkFence frameFence;
+	VkSemaphore completeSemaphore;
 } PerFrame_t;
 
-extern PerFrame_t PerFrame[VKU_MAX_FRAME_COUNT];
+#define FRAMES_IN_FLIGHT 3
+extern PerFrame_t perFrame[FRAMES_IN_FLIGHT];
 
 #endif

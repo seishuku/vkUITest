@@ -2,9 +2,10 @@
 #include "../system/system.h"
 
 #ifdef WIN32
-#include <winsock2.h>
+#include <winsock.h>
 #else
 #include <sys/socket.h>
+#include <sys/unistd.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -46,10 +47,10 @@ Socket_t Network_CreateSocket(void)
 		return -1;
 	}
 
-	if(setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (uint8_t *)&Network_ReceiveBufferSize, sizeof(uint32_t))==-1)
+	if(setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char *)&Network_ReceiveBufferSize, sizeof(uint32_t))==-1)
 		DBGPRINTF(DEBUG_ERROR, "Network_CreateSocket() SO_RCVBUF set option failed.\n");
 
-	if(setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (uint8_t *)&Network_SendBufferSize, sizeof(uint32_t))==-1)
+	if(setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char *)&Network_SendBufferSize, sizeof(uint32_t))==-1)
 		DBGPRINTF(DEBUG_ERROR, "Network_CreateSocket() SO_SNDBUF set option failed.\n");
 
 	// put socket in non-blocking mode

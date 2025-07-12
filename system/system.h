@@ -2,8 +2,12 @@
 #define __SYSTEM_H__
 
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
-#include "../utils/memzone.h"
+#include "memzone.h"
+#include "../utils/config.h"
+
+extern Config_t config;
 
 #ifndef DEBUG_ERROR
 #define DEBUG_ERROR "\x1B[91m"
@@ -24,11 +28,31 @@
 #ifdef ANDROID
 #include <android/log.h>
 #ifndef DBGPRINTF
-#define DBGPRINTF(level, ...) __android_log_print(ANDROID_LOG_INFO, "vkUITest", level __VA_ARGS__)
+inline static void DBGPRINTF(const char *level, const char *format, ...)
+{
+	char string[1024];
+	va_list	ap;
+
+	va_start(ap, format);
+	vsnprintf(string, 1023, format, ap);
+	va_end(ap);
+
+	__android_log_print(ANDROID_LOG_INFO, "vkEngine", "%s%s%s", level, string, DEBUG_NONE);
+}
 #endif
 #else
 #ifndef DBGPRINTF
-#define DBGPRINTF(level, ...) fprintf(stderr, level __VA_ARGS__)
+inline static void DBGPRINTF(const char *level, const char *format, ...)
+{
+	char string[1024];
+	va_list	ap;
+
+	va_start(ap, format);
+	vsnprintf(string, 1023, format, ap);
+	va_end(ap);
+
+	fprintf(stderr, "%s%s%s", level, string, DEBUG_NONE);
+}
 #endif
 #endif
 
@@ -36,7 +60,11 @@
 #define BUFFER_OFFSET(x) ((char *)NULL+(x))
 #endif
 
-extern MemZone_t *Zone;
+#ifndef MEMZONE_SIZE
+#define MEMZONE_SIZE (512*1024*1024)
+#endif
+
+extern MemZone_t *zone;
 
 double GetClock(void);
 

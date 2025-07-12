@@ -14,64 +14,59 @@
 #include "utils/list.h"
 #include "lights/lights.h"
 #include "utils/event.h"
-#include "utils/input.h"
-#include "particle/particle.h"
-#include "threads/threads.h"
 //#include "vr/vr.h"
 #include "font/font.h"
 #include "audio/audio.h"
 #include "physics/physics.h"
 #include "ui/ui.h"
+#include "utils/config.h"
 #include "perframe.h"
 
 // Done flag from system code
-extern bool Done;
-
-// Initial window size
-uint32_t Width=1280, Height=720;
+extern bool isDone;
 
 // Vulkan instance handle and context structs
-VkInstance Instance;
-VkuContext_t Context;
-
-// Vulkan memory allocator zone
-VkuMemZone_t *VkZone;
+VkInstance vkInstance;
+VkuContext_t vkContext;
 
 // extern timing data from system main
 extern float fps, fTimeStep, fTime;
 
 // Vulkan swapchain helper struct
-VkuSwapchain_t Swapchain;
+VkuSwapchain_t swapchain;
 
 // Depth buffer image and format
-VkFormat DepthFormat;
-VkuImage_t DepthImage;
+VkFormat depthFormat;
+VkuImage_t depthImage;
 
-VkRenderPass RenderPass;
+VkRenderPass renderPass;
 
-VkuImage_t FaceTexture;
+VkuImage_t faceTexture;
 
-Sample_t Explode;
+Sample_t explode;
 
-Font_t Fnt; // Fnt instead of Font, because Xlib is dumb and declares a type Font *rolley-eyes*
+Font_t font;
 UI_t UI;
 
-uint32_t CursorID=UINT32_MAX;
+PerFrame_t perFrame[FRAMES_IN_FLIGHT];
 
-uint32_t SliderID=UINT32_MAX;
+uint32_t cursorID=UINT32_MAX;
 
-uint32_t Color1ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
-uint32_t Color2ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
-uint32_t Color3ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
-uint32_t Color4ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
+uint32_t sliderID=UINT32_MAX;
 
-uint32_t ColorMapID=UINT32_MAX;
+uint32_t colorWinID=UINT32_MAX;
+uint32_t color1ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
+uint32_t color2ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
+uint32_t color3ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
+uint32_t color4ID[3]={ UINT32_MAX, UINT32_MAX, UINT32_MAX };
 
-uint32_t SpriteID=UINT32_MAX;
-uint32_t FaceID=UINT32_MAX;
+uint32_t colorMapID=UINT32_MAX;
 
-VkuBuffer_t FireStagingBuffer;
-VkuImage_t FireImage;
+uint32_t spriteID=UINT32_MAX;
+uint32_t faceID=UINT32_MAX;
+
+VkuBuffer_t fireStagingBuffer;
+VkuImage_t fireImage;
 
 #define FIRE_WIDTH 512
 #define FIRE_HEIGHT 256
@@ -87,10 +82,10 @@ vec3 Bezier(float t, vec3 p0, vec3 p1, vec3 p2, vec3 p3)
 	return Vec3_Addv(Vec3_Addv(Vec3_Addv(Vec3_Muls(a, t*t*t), Vec3_Muls(b, t*t)), Vec3_Muls(c, t)), p0);
 }
 
-void FireRunStep(uint32_t Index)
+void FireRunStep(uint32_t index)
 {
 	for(uint32_t i=0;i<FIRE_WIDTH*4;i++)
-		buffer1[rand()%(FIRE_WIDTH*4)]=RandRange(0, 255);
+		buffer1[Random()%(FIRE_WIDTH*4)]=Random()%255;
 
 	for(uint32_t y=2;y<FIRE_HEIGHT-1;y++)
 	{
@@ -105,15 +100,12 @@ void FireRunStep(uint32_t Index)
 		}
 	}
 
-	vec3 Color1=Vec3(UI_GetBarGraphValue(&UI, Color1ID[0]), UI_GetBarGraphValue(&UI, Color1ID[1]), UI_GetBarGraphValue(&UI, Color1ID[2]));
-	vec3 Color2=Vec3(UI_GetBarGraphValue(&UI, Color2ID[0]), UI_GetBarGraphValue(&UI, Color2ID[1]), UI_GetBarGraphValue(&UI, Color2ID[2]));
-	vec3 Color3=Vec3(UI_GetBarGraphValue(&UI, Color3ID[0]), UI_GetBarGraphValue(&UI, Color3ID[1]), UI_GetBarGraphValue(&UI, Color3ID[2]));
-	vec3 Color4=Vec3(UI_GetBarGraphValue(&UI, Color4ID[0]), UI_GetBarGraphValue(&UI, Color4ID[1]), UI_GetBarGraphValue(&UI, Color4ID[2]));
+	vec3 Color1=Vec3(UI_GetBarGraphValue(&UI, color1ID[0]), UI_GetBarGraphValue(&UI, color1ID[1]), UI_GetBarGraphValue(&UI, color1ID[2]));
+	vec3 Color2=Vec3(UI_GetBarGraphValue(&UI, color2ID[0]), UI_GetBarGraphValue(&UI, color2ID[1]), UI_GetBarGraphValue(&UI, color2ID[2]));
+	vec3 Color3=Vec3(UI_GetBarGraphValue(&UI, color3ID[0]), UI_GetBarGraphValue(&UI, color3ID[1]), UI_GetBarGraphValue(&UI, color3ID[2]));
+	vec3 Color4=Vec3(UI_GetBarGraphValue(&UI, color4ID[0]), UI_GetBarGraphValue(&UI, color4ID[1]), UI_GetBarGraphValue(&UI, color4ID[2]));
 
-	void *Data=NULL;
-	vkMapMemory(Context.Device, FireStagingBuffer.DeviceMemory, 0, VK_WHOLE_SIZE, 0, &Data);
-
-	uint8_t *fb=(uint8_t *)Data;
+	uint8_t *fb=(uint8_t *)fireStagingBuffer.memory->mappedPointer;
 
 	for(uint32_t y=0;y<FIRE_HEIGHT;y++)
 	{
@@ -121,11 +113,11 @@ void FireRunStep(uint32_t Index)
 
 		for(uint32_t x=0;x<FIRE_WIDTH;x++)
 		{
-			float Fire=min(max(((float)buffer2[flipy*FIRE_WIDTH+x]/255.0f)-UI_GetBarGraphValue(&UI, SliderID), 0.0f), 1.0f);
+			float Fire=clampf(((float)buffer2[flipy*FIRE_WIDTH+x]/255.0f)-UI_GetBarGraphValue(&UI, sliderID), 0.0f, 1.0f);
 			vec3 Color;
 
-			if(UI_GetCheckBoxValue(&UI, ColorMapID))
-				Color=Bezier(min(max(Fire, 0.0f), 1.0f), Color1, Color2, Color3, Color4);
+			if(UI_GetCheckBoxValue(&UI, colorMapID))
+				Color=Bezier(clampf(Fire, 0.0f, 1.0f), Color1, Color2, Color3, Color4);
 			else
 				Color=Vec3b(Fire);
 
@@ -136,18 +128,16 @@ void FireRunStep(uint32_t Index)
 		}
 	}
 
-	vkUnmapMemory(Context.Device, FireStagingBuffer.DeviceMemory);
-
 	memcpy(buffer1, buffer2, FIRE_WIDTH*FIRE_HEIGHT);
 
-	vkuTransitionLayout(PerFrame[Index].CommandBuffer, FireImage.Image, 1, 0, 1, 0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	vkCmdCopyBufferToImage(PerFrame[Index].CommandBuffer, FireStagingBuffer.Buffer, FireImage.Image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, (VkBufferImageCopy[1])
+	vkuTransitionLayout(perFrame[index].commandBuffer, fireImage.image, 1, 0, 1, 0, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	vkCmdCopyBufferToImage(perFrame[index].commandBuffer, fireStagingBuffer.buffer, fireImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, (VkBufferImageCopy[1])
 	{
 		{
 			0, 0, 0, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, { 0, 0, 0 }, { FIRE_WIDTH, FIRE_HEIGHT, 1 }
 		}
 	});
-	vkuTransitionLayout(PerFrame[Index].CommandBuffer, FireImage.Image, 1, 0, 1, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	vkuTransitionLayout(perFrame[index].commandBuffer, fireImage.image, 1, 0, 1, 0, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 void RecreateSwapchain(void);
@@ -156,43 +146,43 @@ void RecreateSwapchain(void);
 bool CreateFramebuffers(uint32_t targetWidth, uint32_t targetHeight)
 {
 	VkImageFormatProperties imageFormatProps;
-	VkResult Result;
+	VkResult result;
 
-	DepthFormat=VK_FORMAT_D32_SFLOAT_S8_UINT;
-	Result=vkGetPhysicalDeviceImageFormatProperties(Context.PhysicalDevice,
-															 DepthFormat,
+	depthFormat=VK_FORMAT_D32_SFLOAT_S8_UINT;
+	result=vkGetPhysicalDeviceImageFormatProperties(vkContext.physicalDevice,
+															 depthFormat,
 															 VK_IMAGE_TYPE_2D,
 															 VK_IMAGE_TILING_OPTIMAL,
 															 VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 															 0,
 															 &imageFormatProps);
 
-	if(Result!=VK_SUCCESS)
+	if(result!=VK_SUCCESS)
 	{
-		DepthFormat=VK_FORMAT_D24_UNORM_S8_UINT;
-		Result=vkGetPhysicalDeviceImageFormatProperties(Context.PhysicalDevice, DepthFormat, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &imageFormatProps);
+		depthFormat=VK_FORMAT_D24_UNORM_S8_UINT;
+		result=vkGetPhysicalDeviceImageFormatProperties(vkContext.physicalDevice, depthFormat, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0, &imageFormatProps);
 
-		if(Result!=VK_SUCCESS)
+		if(result!=VK_SUCCESS)
 		{
 			DBGPRINTF(DEBUG_ERROR, "CreateFramebuffers: No suitable depth format found.\n");
 			return false;
 		}
 	}
 
-	vkuCreateTexture2D(&Context, &DepthImage, targetWidth, targetHeight, DepthFormat, VK_SAMPLE_COUNT_1_BIT);
+	vkuCreateTexture2D(&vkContext, &depthImage, targetWidth, targetHeight, depthFormat, VK_SAMPLE_COUNT_1_BIT);
 
-	VkCommandBuffer CommandBuffer=vkuOneShotCommandBufferBegin(&Context);
-	vkuTransitionLayout(CommandBuffer, DepthImage.Image, 1, 0, 1, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-	vkuOneShotCommandBufferEnd(&Context, CommandBuffer);
+	VkCommandBuffer CommandBuffer=vkuOneShotCommandBufferBegin(&vkContext);
+	vkuTransitionLayout(CommandBuffer, depthImage.image, 1, 0, 1, 0, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+	vkuOneShotCommandBufferEnd(&vkContext, CommandBuffer);
 
-	vkCreateRenderPass(Context.Device, &(VkRenderPassCreateInfo)
+	vkCreateRenderPass(vkContext.device, &(VkRenderPassCreateInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
 		.attachmentCount=2,
 		.pAttachments=(VkAttachmentDescription[])
 		{
 			{
-				.format=Swapchain.SurfaceFormat.format,
+				.format=swapchain.surfaceFormat.format,
 				.samples=VK_SAMPLE_COUNT_1_BIT,
 				.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR,
 				.storeOp=VK_ATTACHMENT_STORE_OP_STORE,
@@ -202,7 +192,7 @@ bool CreateFramebuffers(uint32_t targetWidth, uint32_t targetHeight)
 				.finalLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 			},
 			{
-				.format=DepthFormat,
+				.format=depthFormat,
 				.samples=VK_SAMPLE_COUNT_1_BIT,
 				.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR,
 				.storeOp=VK_ATTACHMENT_STORE_OP_DONT_CARE,
@@ -228,20 +218,20 @@ bool CreateFramebuffers(uint32_t targetWidth, uint32_t targetHeight)
 				.layout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 			},
 		},
-	}, 0, &RenderPass);
+	}, 0, &renderPass);
 
-	for(uint32_t i=0;i<Swapchain.NumImages;i++)
+	for(uint32_t i=0;i<swapchain.numImages;i++)
 	{
-		if(vkCreateFramebuffer(Context.Device, &(VkFramebufferCreateInfo)
+		if(vkCreateFramebuffer(vkContext.device, &(VkFramebufferCreateInfo)
 		{
 			.sType=VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-			.renderPass=RenderPass,
+			.renderPass=renderPass,
 			.attachmentCount=2,
-			.pAttachments=(VkImageView[]){ Swapchain.ImageView[i], DepthImage.View },
-			.width=Swapchain.Extent.width,
-			.height=Swapchain.Extent.height,
+			.pAttachments=(VkImageView[]){ swapchain.imageView[i], depthImage.imageView },
+			.width=swapchain.extent.width,
+			.height=swapchain.extent.height,
 			.layers=1,
-		}, 0, &PerFrame[i].FrameBuffer)!=VK_SUCCESS)
+		}, 0, &perFrame[i].frameBuffer)!=VK_SUCCESS)
 			return false;
 	}
 
@@ -253,29 +243,29 @@ void Render(void)
 {
 	static float fireTime=0.0f;
 	const float OneOver60=1.0f/60.0f;
-	static uint32_t Index=0;
+	static uint32_t index=0;
 	uint32_t imageIndex;
 
-	UI_UpdateSpritePosition(&UI, FaceID, Vec2(sinf(fTime*4.0f)*50.0f+(Width/2), cosf(fTime*4.0f)*50.0f+(Height/2)));
+	vkWaitForFences(vkContext.device, 1, &perFrame[index].frameFence, VK_TRUE, UINT64_MAX);
 
-	VkResult Result=vkAcquireNextImageKHR(Context.Device, Swapchain.Swapchain, UINT64_MAX, PerFrame[Index].PresentCompleteSemaphore, VK_NULL_HANDLE, &imageIndex);
+	UI_UpdateSpritePosition(&UI, faceID, Vec2(sinf(fTime*4.0f)*50.0f+(config.renderWidth/2), cosf(fTime*4.0f)*50.0f+(config.renderHeight/2)));
 
-	if(Result==VK_ERROR_OUT_OF_DATE_KHR||Result==VK_SUBOPTIMAL_KHR)
+	VkResult result=vkAcquireNextImageKHR(vkContext.device, swapchain.swapchain, UINT64_MAX, perFrame[index].completeSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+	if(result==VK_ERROR_OUT_OF_DATE_KHR||result==VK_SUBOPTIMAL_KHR)
 	{
-		DBGPRINTF("Swapchain out of date... Rebuilding.\n");
+		DBGPRINTF(DEBUG_ERROR, "Swapchain out of date... Rebuilding.\n");
 		RecreateSwapchain();
 		return;
 	}
 
-	vkWaitForFences(Context.Device, 1, &PerFrame[Index].FrameFence, VK_TRUE, UINT64_MAX);
-
 	// Reset the frame fence and command pool (and thus the command buffer)
-	vkResetFences(Context.Device, 1, &PerFrame[Index].FrameFence);
-	vkResetDescriptorPool(Context.Device, PerFrame[Index].DescriptorPool, 0);
-	vkResetCommandPool(Context.Device, PerFrame[Index].CommandPool, 0);
+	vkResetFences(vkContext.device, 1, &perFrame[index].frameFence);
+	vkResetDescriptorPool(vkContext.device, perFrame[index].descriptorPool, 0);
+	vkResetCommandPool(vkContext.device, perFrame[index].commandPool, 0);
 
 	// Start recording the commands
-	vkBeginCommandBuffer(PerFrame[Index].CommandBuffer, &(VkCommandBufferBeginInfo)
+	vkBeginCommandBuffer(perFrame[index].commandBuffer, &(VkCommandBufferBeginInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
@@ -286,136 +276,114 @@ void Render(void)
 	if(fireTime>=OneOver60)
 	{
 		fireTime=0.0;
-		FireRunStep(Index);
+		FireRunStep(index);
 	}
 
 	// Start a render pass and clear the frame/depth buffer
-	vkCmdBeginRenderPass(PerFrame[Index].CommandBuffer, &(VkRenderPassBeginInfo)
+	vkCmdBeginRenderPass(perFrame[index].commandBuffer, &(VkRenderPassBeginInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-		.renderPass=RenderPass,
-		.framebuffer=PerFrame[Index].FrameBuffer,
+		.renderPass=renderPass,
+		.framebuffer=perFrame[imageIndex].frameBuffer,
+		.renderArea=(VkRect2D){ { 0, 0 }, { config.renderWidth, config.renderHeight } },
 		.clearValueCount=2,
-		.pClearValues=(VkClearValue[]){ { 0.0f, 0.0f, 0.0f, 1.0f }, { 1.0f, 0 } },
-		.renderArea.offset={ 0, 0 },
-		.renderArea.extent=Swapchain.Extent,
+		.pClearValues=(VkClearValue[]){ {{{ 0.0f, 0.0f, 0.0f, 1.0f }}}, {{{ 0.0f, 0 }}} },
 	}, VK_SUBPASS_CONTENTS_INLINE);
 
-	const VkViewport Viewport={
-		.x=0.0f,
-		.y=0.0f,
-		.width=(float)Swapchain.Extent.width,
-		.height=(float)Swapchain.Extent.height,
-		.minDepth=0.0f,
-		.maxDepth=1.0f,
-	};
-	const VkRect2D Scissor={
-		.offset.x=0,
-		.offset.y=0,
-		.extent=Swapchain.Extent,
-	};
+	vkCmdSetViewport(perFrame[index].commandBuffer, 0, 1, &(VkViewport) { 0.0f, 0, (float)config.renderWidth, (float)config.renderHeight, 0.0f, 1.0f });
+	vkCmdSetScissor(perFrame[index].commandBuffer, 0, 1, &(VkRect2D) { { 0, 0 }, { config.renderWidth, config.renderHeight } });
 
-	vkCmdSetViewport(PerFrame[Index].CommandBuffer, 0, 1, &Viewport);
-	vkCmdSetScissor(PerFrame[Index].CommandBuffer, 0, 1, &Scissor);
+	UI_Draw(&UI, index, 0, fTimeStep);
 
-	UI_Draw(&UI, Index);
+	Font_Print(&font, 32.0f, 0.0f, 0.0f, "FPS: %0.1f\n\x1B[91mFrame time: %0.5fms", fps, fTimeStep*1000.0f);
+	Font_Draw(&font, index, 0);
+	
+	// Reset the font text collection for the next frame
+	Font_Reset(&font);
 
-	Font_Print(&Fnt, 32.0f, 0.0f, 0.0f, "FPS: %0.1f\n\x1B[91mFrame time: %0.5fms", fps, fTimeStep*1000.0f);
-	Font_Draw(&Fnt, Index);
+	vkCmdEndRenderPass(perFrame[index].commandBuffer);
 
-	vkCmdEndRenderPass(PerFrame[Index].CommandBuffer);
-
-	vkEndCommandBuffer(PerFrame[Index].CommandBuffer);
+	vkEndCommandBuffer(perFrame[index].commandBuffer);
 
 	// Submit command queue
-	vkQueueSubmit(Context.Queue, 1, &(VkSubmitInfo)
+	vkQueueSubmit(vkContext.graphicsQueue, 1, &(VkSubmitInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.pWaitDstStageMask=&(VkPipelineStageFlags) { VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT },
 		.waitSemaphoreCount=1,
-		.pWaitSemaphores=&PerFrame[Index].PresentCompleteSemaphore,
+		.pWaitSemaphores=&perFrame[index].completeSemaphore,
 		.signalSemaphoreCount=1,
-		.pSignalSemaphores=&PerFrame[Index].RenderCompleteSemaphore,
+		.pSignalSemaphores=&swapchain.waitSemaphore[imageIndex],
 		.commandBufferCount=1,
-		.pCommandBuffers=&PerFrame[Index].CommandBuffer,
-	}, PerFrame[Index].FrameFence);
+		.pCommandBuffers=&perFrame[index].commandBuffer,
+	}, perFrame[index].frameFence);
 
 	// And present it to the screen
-	Result=vkQueuePresentKHR(Context.Queue, &(VkPresentInfoKHR)
+	result=vkQueuePresentKHR(vkContext.graphicsQueue, &(VkPresentInfoKHR)
 	{
 		.sType=VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		.waitSemaphoreCount=1,
-		.pWaitSemaphores=&PerFrame[Index].RenderCompleteSemaphore,
+		.pWaitSemaphores=&swapchain.waitSemaphore[imageIndex],
 		.swapchainCount=1,
-		.pSwapchains=&Swapchain.Swapchain,
+		.pSwapchains=&swapchain.swapchain,
 		.pImageIndices=&imageIndex,
 	});
 
-	if(Result==VK_ERROR_OUT_OF_DATE_KHR||Result==VK_SUBOPTIMAL_KHR)
+	if(result==VK_ERROR_OUT_OF_DATE_KHR||result==VK_SUBOPTIMAL_KHR)
 	{
-		DBGPRINTF("Swapchain out of date... Rebuilding.\n");
+		DBGPRINTF(DEBUG_ERROR, "Swapchain out of date... Rebuilding.\n");
 		RecreateSwapchain();
 		return;
 	}
 
-	Index=(Index+1)%Swapchain.NumImages;
+	index=(index+1)%FRAMES_IN_FLIGHT;
 }
 
 void ExitButton(void *arg)
 {
-	Done=true;
+	isDone=true;
 }
 
 void ExplodeButton(void *arg)
 {
-	Audio_PlaySample(&Explode, false, 1.0f, NULL);
+	Audio_PlaySample(&explode, false, 1.0f, Vec3b(0.0f));
 }
 
 // Initialization call from system main
 bool Init(void)
 {
-	Event_Add(EVENT_KEYDOWN, Event_KeyDown);
-	Event_Add(EVENT_KEYUP, Event_KeyUp);
-	Event_Add(EVENT_MOUSEDOWN, Event_MouseDown);
-	Event_Add(EVENT_MOUSEUP, Event_MouseUp);
-	Event_Add(EVENT_MOUSEMOVE, Event_Mouse);
+	RandomSeed(123);
+
+	vkuMemAllocator_Init(&vkContext);
 
 	if(!Audio_Init())
 		return false;
 
-	if(!Audio_LoadStatic("assets/explode.wav", &Explode))
-		return false;
-
-	VkZone=vkuMem_Init(&Context, (size_t)(Context.DeviceProperties2.maxMemoryAllocationSize*0.8f));
-
-	if(VkZone==NULL)
+	if(!Audio_LoadStatic("assets/explode.wav", &explode))
 		return false;
 
 	// Create primary frame buffers, depth image
-	CreateFramebuffers(Width, Height);
+	CreateFramebuffers(config.renderWidth, config.renderHeight);
 
-	vkuCreateHostBuffer(&Context, &FireStagingBuffer, FIRE_WIDTH*FIRE_HEIGHT*4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-	vkuCreateTexture2D(&Context, &FireImage, FIRE_WIDTH, FIRE_HEIGHT, VK_FORMAT_B8G8R8A8_SRGB, VK_SAMPLE_COUNT_1_BIT);
+	vkuCreateHostBuffer(&vkContext, &fireStagingBuffer, FIRE_WIDTH*FIRE_HEIGHT*4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+	vkuCreateTexture2D(&vkContext, &fireImage, FIRE_WIDTH, FIRE_HEIGHT, VK_FORMAT_B8G8R8A8_SRGB, VK_SAMPLE_COUNT_1_BIT);
 
-	VkCommandBuffer CommandBuffer=vkuOneShotCommandBufferBegin(&Context);
-	vkuTransitionLayout(CommandBuffer, FireImage.Image, 1, 0, 1, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-	vkuOneShotCommandBufferEnd(&Context, CommandBuffer);
+	VkCommandBuffer CommandBuffer=vkuOneShotCommandBufferBegin(&vkContext);
+	vkuTransitionLayout(CommandBuffer, fireImage.image, 1, 0, 1, 0, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	vkuOneShotCommandBufferEnd(&vkContext, CommandBuffer);
 
 	// Other per-frame data
-	for(uint32_t i=0;i<Swapchain.NumImages;i++)
+	for(uint32_t i=0;i<FRAMES_IN_FLIGHT;i++)
 	{
 		// Create needed fence and semaphores for rendering
 		// Wait fence for command queue, to signal when we can submit commands again
-		vkCreateFence(Context.Device, &(VkFenceCreateInfo) {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags=VK_FENCE_CREATE_SIGNALED_BIT }, VK_NULL_HANDLE, &PerFrame[i].FrameFence);
-
-		// Semaphore for image presentation, to signal when we can present again
-		vkCreateSemaphore(Context.Device, &(VkSemaphoreCreateInfo) {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext=VK_NULL_HANDLE }, VK_NULL_HANDLE, &PerFrame[i].PresentCompleteSemaphore);
+		vkCreateFence(vkContext.device, &(VkFenceCreateInfo) {.sType=VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags=VK_FENCE_CREATE_SIGNALED_BIT }, VK_NULL_HANDLE, &perFrame[i].frameFence);
 
 		// Semaphore for render complete, to signal when we can render again
-		vkCreateSemaphore(Context.Device, &(VkSemaphoreCreateInfo) {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext=VK_NULL_HANDLE }, VK_NULL_HANDLE, &PerFrame[i].RenderCompleteSemaphore);
+		vkCreateSemaphore(vkContext.device, &(VkSemaphoreCreateInfo) {.sType=VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext=VK_NULL_HANDLE }, VK_NULL_HANDLE, &perFrame[i].completeSemaphore);
 
 		// Per-frame descriptor pool for main thread
-		vkCreateDescriptorPool(Context.Device, &(VkDescriptorPoolCreateInfo)
+		vkCreateDescriptorPool(vkContext.device, &(VkDescriptorPoolCreateInfo)
 		{
 			.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
 			.maxSets=1024, // Max number of descriptor sets that can be allocated from this pool
@@ -439,61 +407,82 @@ bool Init(void)
 					.descriptorCount=1024,
 				},
 			},
-		}, VK_NULL_HANDLE, &PerFrame[i].DescriptorPool);
+		}, VK_NULL_HANDLE, &perFrame[i].descriptorPool);
 
 		// Create per-frame command pools
-		vkCreateCommandPool(Context.Device, &(VkCommandPoolCreateInfo)
+		vkCreateCommandPool(vkContext.device, &(VkCommandPoolCreateInfo)
 		{
 			.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
 			.flags=0,
-			.queueFamilyIndex=Context.QueueFamilyIndex,
-		}, VK_NULL_HANDLE, &PerFrame[i].CommandPool);
+			.queueFamilyIndex=vkContext.graphicsQueueIndex,
+		}, VK_NULL_HANDLE, &perFrame[i].commandPool);
 
 		// Allocate the command buffers we will be rendering into
-		vkAllocateCommandBuffers(Context.Device, &(VkCommandBufferAllocateInfo)
+		vkAllocateCommandBuffers(vkContext.device, &(VkCommandBufferAllocateInfo)
 		{
 			.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-			.commandPool=PerFrame[i].CommandPool,
+			.commandPool=perFrame[i].commandPool,
 			.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,
 			.commandBufferCount=1,
-		}, &PerFrame[i].CommandBuffer);
+		}, &perFrame[i].commandBuffer);
 	}
 
-	Image_Upload(&Context, &FaceTexture, "assets/face.tga", IMAGE_BILINEAR);
+	Image_Upload(&vkContext, &faceTexture, "assets/face.tga", IMAGE_BILINEAR);
 
-	Font_Init(&Fnt);
+	Font_Init(&font);
 
-	UI_Init(&UI, Vec2(0.0f, 0.0f), Vec2((float)Width, (float)Height));
+	UI_Init(&UI, Vec2(0.0f, 0.0f), Vec2((float)config.renderWidth, (float)config.renderHeight));
 
-	SpriteID=UI_AddSprite(&UI, Vec2((float)Width/2.0f, (float)Height/2.0f), Vec2(FIRE_WIDTH, FIRE_HEIGHT), Vec3(1.0f, 1.0f, 1.0f), &FireImage, 0.0f);
+	spriteID=UI_AddSprite(&UI, Vec2((float)config.renderWidth/2.0f, (float)config.renderHeight/2.0f), Vec2(FIRE_WIDTH, FIRE_HEIGHT), Vec3(1.0f, 1.0f, 1.0f), false, &fireImage, 0.0f);
 
-	FaceID=UI_AddSprite(&UI, Vec2((float)Width/2.0f, (float)Height/2.0f), Vec2(128.0f, 128.0f), Vec3(1.0f, 1.0f, 1.0f), &FaceTexture, 0.0f);
+	faceID=UI_AddSprite(&UI, Vec2((float)config.renderWidth/2.0f, (float)config.renderHeight/2.0f), Vec2(128.0f, 128.0f), Vec3(1.0f, 1.0f, 1.0f), false, &faceTexture, 0.0f);
 
-	UI_AddButton(&UI, Vec2((float)Width-200.0f, 100.0f), Vec2(100.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), "Exit", ExitButton);
-	UI_AddButton(&UI, Vec2((float)Width-200.0f, 400.0f), Vec2(100.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), "Explode", ExplodeButton);
+	UI_AddButton(&UI, Vec2((float)config.renderWidth-200.0f, 100.0f), Vec2(100.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), false, "Exit", ExitButton);
+	UI_AddButton(&UI, Vec2((float)config.renderWidth-200.0f, 400.0f), Vec2(100.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), false, "Explode", ExplodeButton);
 
-	SliderID=UI_AddBarGraph(&UI, Vec2((float)Width-400.0f, (float)Height-50.0f), Vec2(400.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), "Fire", false, 0.4f, 0.0f, 0.0f);
+	sliderID=UI_AddBarGraph(&UI, Vec2((float)config.renderWidth-400.0f, (float)config.renderHeight-50.0f), Vec2(400.0f, 50.0f), Vec3(0.5f, 0.5f, 0.5f), false, "Fire", false, 0.4f, 0.0f, 0.0f);
 
-	Color1ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-32.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), "Color 1 Red", false, 0.0f, 1.0f, 0.0f);
-	Color1ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-64.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), "Color 1 Green", false, 0.0f, 1.0f, 0.0f);
-	Color1ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-96.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), "Color 1 Blue", false, 0.0f, 1.0f, 0.0f);
+	colorWinID=UI_AddWindow(&UI, Vec2(10.0f, config.renderHeight-32.0f), Vec2(256.0f, 480.0f), Vec3(0.25, 0.25, 0.25), false, "Color Controls");
 
-	Color2ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-160.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), "Color 2 Red", false, 0.0f, 1.0f, 1.0f);
-	Color2ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-192.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), "Color 2 Green", false, 0.0f, 1.0f, 0.0f);
-	Color2ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-224.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), "Color 2 Blue", false, 0.0f, 1.0f, 0.0f);
+	color1ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, -32.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), false, "Color 1 Red", false, 0.0f, 1.0f, 0.0f);
+	color1ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, -64.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), false, "Color 1 Green", false, 0.0f, 1.0f, 0.0f);
+	color1ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, -96.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), false, "Color 1 Blue", false, 0.0f, 1.0f, 0.0f);
 
-	Color3ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-288.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), "Color 3 Red", false, 0.0f, 1.0f, 1.0f);
-	Color3ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-320.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), "Color 3 Green", false, 0.0f, 1.0f, 1.0f);
-	Color3ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-352.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), "Color 3 Blue", false, 0.0f, 1.0f, 0.0f);
+	color2ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, -160.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), false, "Color 2 Red", false, 0.0f, 1.0f, 1.0f);
+	color2ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, -192.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), false, "Color 2 Green", false, 0.0f, 1.0f, 0.0f);
+	color2ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, -224.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), false, "Color 2 Blue", false, 0.0f, 1.0f, 0.0f);
 
-	Color4ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-416.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), "Color 4 Red", false, 0.0f, 1.0f, 1.0f);
-	Color4ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-448.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), "Color 4 Green", false, 0.0f, 1.0f, 1.0f);
-	Color4ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, (float)Height-480.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), "Color 4 Blue", false, 0.0f, 1.0f, 1.0f);
+	color3ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, -288.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), false, "Color 3 Red", false, 0.0f, 1.0f, 1.0f);
+	color3ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, -320.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), false, "Color 3 Green", false, 0.0f, 1.0f, 1.0f);
+	color3ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, -352.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), false, "Color 3 Blue", false, 0.0f, 1.0f, 0.0f);
 
-	ColorMapID=UI_AddCheckBox(&UI, Vec2((float)Width-375.0f, (float)Height-75.0f), 25.0f, Vec3(0.5f, 0.5f, 0.5f), "Color mapping", true);
+	color4ID[0]=UI_AddBarGraph(&UI, Vec2(0.0f, -416.0f), Vec2(256.0f, 32.0f), Vec3(1.0f, 0.0f, 0.0f), false, "Color 4 Red", false, 0.0f, 1.0f, 1.0f);
+	color4ID[1]=UI_AddBarGraph(&UI, Vec2(0.0f, -448.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 1.0f, 0.0f), false, "Color 4 Green", false, 0.0f, 1.0f, 1.0f);
+	color4ID[2]=UI_AddBarGraph(&UI, Vec2(0.0f, -480.0f), Vec2(256.0f, 32.0f), Vec3(0.0f, 0.0f, 1.0f), false, "Color 4 Blue", false, 0.0f, 1.0f, 1.0f);
+
+	UI_WindowAddControl(&UI, colorWinID, color1ID[0]);
+	UI_WindowAddControl(&UI, colorWinID, color1ID[1]);
+	UI_WindowAddControl(&UI, colorWinID, color1ID[2]);
+	UI_WindowAddControl(&UI, colorWinID, color2ID[0]);
+	UI_WindowAddControl(&UI, colorWinID, color2ID[1]);
+	UI_WindowAddControl(&UI, colorWinID, color2ID[2]);
+	UI_WindowAddControl(&UI, colorWinID, color3ID[0]);
+	UI_WindowAddControl(&UI, colorWinID, color3ID[1]);
+	UI_WindowAddControl(&UI, colorWinID, color3ID[2]);
+	UI_WindowAddControl(&UI, colorWinID, color4ID[0]);
+	UI_WindowAddControl(&UI, colorWinID, color4ID[1]);
+	UI_WindowAddControl(&UI, colorWinID, color4ID[2]);
+
+	colorMapID=UI_AddCheckBox(&UI, Vec2((float)config.renderWidth-375.0f, (float)config.renderHeight-75.0f), 25.0f, Vec3(0.5f, 0.5f, 0.5f), false, "Color mapping", true);
 
 	// Cursor has to be last, otherwise layer order will obstruct it
-	CursorID=UI_AddCursor(&UI, Vec2(0.0f, 0.0f), 16.0, Vec3(1.0f, 1.0f, 1.0f));
+	cursorID=UI_AddCursor(&UI, Vec2(0.0f, 0.0f), 16.0, Vec3(1.0f, 1.0f, 1.0f), false);
+
+	if(!Zone_VerifyHeap(zone))
+		exit(-1);
+
+	DBGPRINTF(DEBUG_WARNING, "\nCurrent vulkan zone memory allocations:\n");
+	vkuMemAllocator_Print();
 
 	return true;
 }
@@ -501,84 +490,82 @@ bool Init(void)
 // Rebuild vulkan swapchain and related data
 void RecreateSwapchain(void)
 {
-	if(Context.Device!=VK_NULL_HANDLE) // Windows quirk, WM_SIZE is signaled on window creation, *before* Vulkan get initalized
+	if(vkContext.device!=VK_NULL_HANDLE) // Windows quirk, WM_SIZE is signaled on window creation, *before* Vulkan get initalized
 	{
 		// Wait for the device to complete any pending work
-		vkDeviceWaitIdle(Context.Device);
+		vkDeviceWaitIdle(vkContext.device);
 
 		// To resize a surface, we need to destroy and recreate anything that's tied to the surface.
 		// This is basically just the swapchain, framebuffers, and depthbuffer.
 
 		// Swapchain, framebuffer, and depthbuffer destruction
-		vkuDestroyImageBuffer(&Context, &DepthImage);
+		vkuDestroyImageBuffer(&vkContext, &depthImage);
 
 		// Destroy framebuffers
-		for(uint32_t i=0;i<Swapchain.NumImages;i++)
-			vkDestroyFramebuffer(Context.Device, PerFrame[i].FrameBuffer, VK_NULL_HANDLE);
+		for(uint32_t i=0;i<swapchain.numImages;i++)
+			vkDestroyFramebuffer(vkContext.device, perFrame[i].frameBuffer, VK_NULL_HANDLE);
 
-		vkDestroyRenderPass(Context.Device, RenderPass, VK_NULL_HANDLE);
+		vkDestroyRenderPass(vkContext.device, renderPass, VK_NULL_HANDLE);
 			
 		// Destroy the swapchain
-		vkuDestroySwapchain(&Context, &Swapchain);
+		vkuDestroySwapchain(&vkContext, &swapchain);
 
 		// Recreate the swapchain
-		vkuCreateSwapchain(&Context, &Swapchain, VK_TRUE);
+		vkuCreateSwapchain(&vkContext, &swapchain, VK_TRUE);
 
-		Width=Swapchain.Extent.width;
-		Height=Swapchain.Extent.height;
-		UI.Size.x=(float)Width;
-		UI.Size.y=(float)Height;
+		config.renderWidth=swapchain.extent.width;
+		config.renderHeight=swapchain.extent.height;
+		UI.size.x=(float)config.renderWidth;
+		UI.size.y=(float)config.renderHeight;
 
 		// Recreate the framebuffer
-		CreateFramebuffers(Width, Height);
+		CreateFramebuffers(config.renderWidth, config.renderHeight);
 	}
 }
 
 // Destroy call from system main
 void Destroy(void)
 {
-	vkDeviceWaitIdle(Context.Device);
+	vkDeviceWaitIdle(vkContext.device);
 
 	Audio_Destroy();
 
-	Zone_Free(Zone, Explode.data);
+	Zone_Free(zone, explode.data);
 
 	UI_Destroy(&UI);
-	Font_Destroy(&Fnt);
+	Font_Destroy(&font);
 
-	vkuDestroyBuffer(&Context, &FireStagingBuffer);
-	vkuDestroyImageBuffer(&Context, &FireImage);
+	vkuDestroyBuffer(&vkContext, &fireStagingBuffer);
+	vkuDestroyImageBuffer(&vkContext, &fireImage);
 
-	vkuDestroyImageBuffer(&Context, &FaceTexture);
+	vkuDestroyImageBuffer(&vkContext, &faceTexture);
 
-	vkDestroyRenderPass(Context.Device, RenderPass, VK_NULL_HANDLE);
+	vkDestroyRenderPass(vkContext.device, renderPass, VK_NULL_HANDLE);
 
 	// Swapchain, framebuffer, and depthbuffer destruction
-	vkuDestroyImageBuffer(&Context, &DepthImage);
+	vkuDestroyImageBuffer(&vkContext, &depthImage);
 
-	for(uint32_t i=0;i<Swapchain.NumImages;i++)
+	// Destroy framebuffers
+	for(uint32_t i=0;i<swapchain.numImages;i++)
+		vkDestroyFramebuffer(vkContext.device, perFrame[i].frameBuffer, VK_NULL_HANDLE);
+
+	for(uint32_t i=0;i<FRAMES_IN_FLIGHT;i++)
 	{
-		// Destroy framebuffers
-		vkDestroyFramebuffer(Context.Device, PerFrame[i].FrameBuffer, VK_NULL_HANDLE);
-
 		// Destroy sync objects
-		vkDestroyFence(Context.Device, PerFrame[i].FrameFence, VK_NULL_HANDLE);
-
-		vkDestroySemaphore(Context.Device, PerFrame[i].PresentCompleteSemaphore, VK_NULL_HANDLE);
-		vkDestroySemaphore(Context.Device, PerFrame[i].RenderCompleteSemaphore, VK_NULL_HANDLE);
+		vkDestroyFence(vkContext.device, perFrame[i].frameFence, VK_NULL_HANDLE);
+		vkDestroySemaphore(vkContext.device, perFrame[i].completeSemaphore, VK_NULL_HANDLE);
 
 		// Destroy main thread descriptor pools
-		vkDestroyDescriptorPool(Context.Device, PerFrame[i].DescriptorPool, VK_NULL_HANDLE);
+		vkDestroyDescriptorPool(vkContext.device, perFrame[i].descriptorPool, VK_NULL_HANDLE);
 
 		// Destroy command pools
-		vkDestroyCommandPool(Context.Device, PerFrame[i].CommandPool, VK_NULL_HANDLE);
+		vkDestroyCommandPool(vkContext.device, perFrame[i].commandPool, VK_NULL_HANDLE);
 	}
 
-	vkuDestroySwapchain(&Context, &Swapchain);
+	vkuDestroySwapchain(&vkContext, &swapchain);
 	//////////
 
-	DBGPRINTF(DEBUG_INFO"Remaining Vulkan memory blocks:\n");
-	vkuMem_Print(VkZone);
-	vkuMem_Destroy(&Context, VkZone);
-	DBGPRINTF(DEBUG_NONE);
+	DBGPRINTF(DEBUG_INFO, "Remaining Vulkan memory blocks:\n");
+	vkuMemAllocator_Print();
+	vkuMemAllocator_Destroy();
 }

@@ -7,179 +7,212 @@
 #include "../math/math.h"
 #include "vulkan.h"
 
-VkuMemZone_t *vkuMem_Init(VkuContext_t *Context, size_t Size)
+bool vkuMem_Init(VkuContext_t *context, VkuMemZone_t *vkZone, uint32_t typeIndex, size_t size)
 {
-	VkuMemZone_t *VkZone=(VkuMemZone_t *)Zone_Malloc(Zone, sizeof(VkuMemZone_t));
-
-	if(VkZone==NULL)
+	// Set up create info with slab size
+	VkMemoryAllocateInfo allocateInfo=
 	{
-		DBGPRINTF("Unable to allocate memory for vulkan memory zone.\n");
+		.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+		.allocationSize=size,
+		.memoryTypeIndex=typeIndex,
+	};
+
+	// Attempt to allocate it
+	VkResult result=vkAllocateMemory(context->device, &allocateInfo, VK_NULL_HANDLE, &vkZone->deviceMemory);
+
+	if(result!=VK_SUCCESS)
+	{
+#ifdef _DEBUG
+		DBGPRINTF(DEBUG_ERROR, "Failed to allocate vulakn memory zone (Result=%d).\n", result);
+#endif
 		return false;
 	}
 
-	VkuMemBlock_t *Block=(VkuMemBlock_t *)Zone_Malloc(Zone, sizeof(VkuMemBlock_t));
-	Block->Offset=0;
-	Block->Size=Size;
-	Block->Free=true;
-	Block->Prev=NULL;
-	Block->Next=NULL;
+	vkZone->blocks=(VkuMemBlock_t *)Zone_Malloc(zone, sizeof(VkuMemBlock_t));
 
-	VkZone->Blocks=Block;
-
-	VkZone->Size=Size;
-
-	// Set up create info with slab size
-	VkMemoryAllocateInfo AllocateInfo=
+	if(vkZone->blocks==NULL)
 	{
-		.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-		.allocationSize=Size,
-	};
+		vkFreeMemory(context->device, vkZone->deviceMemory, VK_NULL_HANDLE);
 
-	// Search for the first memory type on the local memory heap and set it
-	for(uint32_t Index=0;Index<Context->DeviceMemProperties.memoryTypeCount;Index++)
-	{
-		if(Context->DeviceMemProperties.memoryTypes[Index].propertyFlags&(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_DEVICE_UNCACHED_BIT_AMD))
-		{
-			AllocateInfo.memoryTypeIndex=Index;
-			break;
-		}
+		DBGPRINTF(DEBUG_ERROR, "Failed to allocate memory for memory block.\n");
+		return false;
 	}
 
-	// Attempt to allocate it
-	VkResult Result=vkAllocateMemory(Context->Device, &AllocateInfo, VK_NULL_HANDLE, &VkZone->DeviceMemory);
+	// Set up the initial free block
+	vkZone->blocks->offset=0;
+	vkZone->blocks->size=size;
+	vkZone->blocks->free=true;
+	vkZone->blocks->deviceMemory=vkZone->deviceMemory;
+	vkZone->blocks->mappedPointer=NULL;
+	vkZone->blocks->prev=NULL;
+	vkZone->blocks->next=NULL;
 
-	if(Result!=VK_SUCCESS)
+	vkZone->size=size;
+
+	// If this is a host memory heap, map a pointer to it
+	if(context->deviceMemProperties.memoryTypes[typeIndex].propertyFlags&(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT|VK_MEMORY_PROPERTY_HOST_CACHED_BIT))
 	{
-		DBGPRINTF(DEBUG_ERROR, "Failed to allocate vulakn memory zone (Result=%d).\n", Result);
-		return NULL;
-	}
+		result=vkMapMemory(context->device, vkZone->deviceMemory, 0, VK_WHOLE_SIZE, 0, &vkZone->mappedPointer);
 
-	DBGPRINTF(DEBUG_INFO, "Vulakn memory zone allocated (OBJ: 0x%p), size: %0.3fMB\n", VkZone->DeviceMemory, (float)Size/1000.0f/1000.0f);
-	return VkZone;
-}
-
-void vkuMem_Destroy(VkuContext_t *Context, VkuMemZone_t *VkZone)
-{
-	if(VkZone)
-	{
-		VkuMemBlock_t *Block=VkZone->Blocks;
-
-		while(Block!=NULL)
+		if(result!=VK_SUCCESS)
 		{
-			Zone_Free(Zone, Block);
-			Block=Block->Next;
+			DBGPRINTF(DEBUG_ERROR, "Failed to map vulakn device memory (Result=%d).\n", result);
+			vkZone->mappedPointer=NULL;
 		}
 
-		vkFreeMemory(Context->Device, VkZone->DeviceMemory, VK_NULL_HANDLE);
-		Zone_Free(Zone, VkZone);
+		if(vkZone->mappedPointer!=NULL)
+			vkZone->blocks->mappedPointer=vkZone->mappedPointer;
+	}
+
+	DBGPRINTF(DEBUG_INFO, "Vulakn memory zone allocated (OBJ: 0x%p), size: %0.3fMB\n", vkZone->deviceMemory, (float)size/1000.0f/1000.0f);
+
+	return true;
+}
+
+void vkuMem_Destroy(VkuContext_t *context, VkuMemZone_t *vkZone)
+{
+	if(vkZone->blocks)
+	{
+		VkuMemBlock_t *block=vkZone->blocks;
+
+		while(block!=NULL)
+		{
+			Zone_Free(zone, block);
+			block=block->next;
+		}
+
+		if(vkZone->mappedPointer)
+			vkUnmapMemory(context->device, vkZone->deviceMemory);
+
+		vkFreeMemory(context->device, vkZone->deviceMemory, VK_NULL_HANDLE);
 	}
 }
 
-void vkuMem_Free(VkuMemZone_t *VkZone, VkuMemBlock_t *Block)
+void vkuMem_Free(VkuMemZone_t *vkZone, VkuMemBlock_t *block)
 {
-	if(Block==NULL)
+	if(block==NULL)
 	{
 		DBGPRINTF(DEBUG_WARNING, "VkuMem_Free: Attempting to free NULL pointer\n");
 		return;
 	}
 
-	if(Block->Free)
+	if(block->free)
 	{
 		DBGPRINTF(DEBUG_WARNING, "VkuMem_Free: Attempting to free already freed pointer.\n");
 		return;
 	}
 
-	Block->Free=true;
+	block->free=true;
 
-	if(Block->Prev&&Block->Prev->Free)
+	if(block->prev&&block->prev->free)
 	{
-		VkuMemBlock_t *Last=Block->Prev;
+		VkuMemBlock_t *Last=block->prev;
 
-		Last->Size+=Block->Size;
-		Last->Next=Block->Next;
+		Last->size+=block->size;
+		Last->next=block->next;
 
-		if(Last->Next)
-			Last->Next->Prev=Last;
+		if(Last->next)
+			Last->next->prev=Last;
 
-		if(Block==VkZone->Blocks)
-			VkZone->Blocks=Last;
+		if(block==vkZone->blocks)
+			vkZone->blocks=Last;
 
-		Zone_Free(Zone, Block);
-		Block=Last;
+		Zone_Free(zone, block);
+		block=Last;
 	}
 
-	if(Block->Next&&Block->Next->Free)
+	if(block->next&&block->next->free)
 	{
-		VkuMemBlock_t *Next=Block->Next;
+		VkuMemBlock_t *next=block->next;
 
-		Block->Size+=Next->Size;
-		Block->Next=Next->Next;
+		block->size+=next->size;
+		block->next=next->next;
 
-		if(Block->Next)
-			Block->Next->Prev=Block;
+		if(block->next)
+			block->next->prev=block;
 
-		if(Next==VkZone->Blocks)
-			VkZone->Blocks=Block;
+		if(next==vkZone->blocks)
+			vkZone->blocks=block;
 
-		Zone_Free(Zone, Next);
+		Zone_Free(zone, next);
 	}
 }
 
-VkuMemBlock_t *vkuMem_Malloc(VkuMemZone_t *VkZone, VkMemoryRequirements Requirements)
+static inline size_t AlignUp(size_t value, size_t alignment)
 {
-	const size_t MinimumBlockSize=64;
+	return (value+alignment-1)&~(alignment-1);
+}
 
-	// Does size also need this alignment?
-	size_t Size=(Requirements.size+(Requirements.alignment-1))&~(Requirements.alignment-1);
+VkuMemBlock_t *vkuMem_Malloc(VkuMemZone_t *vkZone, VkMemoryRequirements memoryRequirements)
+{
+	const size_t minimumBlockSize=memoryRequirements.alignment;
 
-	VkuMemBlock_t *Base=VkZone->Blocks;
+	// Align size to the memory requirements
+	const size_t alignedSize=AlignUp(memoryRequirements.size, memoryRequirements.alignment);
 
-	while(Base!=NULL)
+	VkuMemBlock_t *baseBlock=vkZone->blocks;
+
+	while(baseBlock!=NULL)
 	{
-		if(Base->Free&&Base->Size>=Size)
+		if(baseBlock->free&&baseBlock->size>=alignedSize)
 		{
-			size_t Extra=Base->Size-Size;
+			const size_t remainingSize=baseBlock->size-alignedSize;
 
-			if(Extra>MinimumBlockSize)
+			// Check if we can split the block and ensure alignment for the new block
+			if(remainingSize>=minimumBlockSize)
 			{
-				VkuMemBlock_t *New=(VkuMemBlock_t *)Zone_Malloc(Zone, sizeof(VkuMemBlock_t));
-				New->Size=Extra;
-				New->Offset=Size;
-				New->Free=true;
-				New->Prev=Base;
-				New->Next=Base->Next;
+				// Create a new free space block from the extra space
+				VkuMemBlock_t *newBlock=(VkuMemBlock_t *)Zone_Malloc(zone, sizeof(VkuMemBlock_t));
 
-				Base->Next=New;
-				Base->Size=Size;
+				// Align the new block's offset
+				newBlock->offset=baseBlock->offset+alignedSize;
+				newBlock->size=remainingSize;
+				newBlock->free=true;
+				newBlock->deviceMemory=vkZone->deviceMemory;
 
-				if(Base->Prev)
-					Base->Offset=(Base->Prev->Size+Base->Prev->Offset+(Requirements.alignment-1))&~(Requirements.alignment-1);
+				if(vkZone->mappedPointer)
+					newBlock->mappedPointer=(void *)((uint8_t *)vkZone->mappedPointer+newBlock->offset);
+
+				newBlock->prev=baseBlock;
+				newBlock->next=baseBlock->next;
+
+				if(baseBlock->next)
+					baseBlock->next->prev=newBlock;
+
+				baseBlock->next=newBlock;
+				baseBlock->size=alignedSize;
 			}
 
-			Base->Free=false;
+			// Mark the base block as used and readjust offset and mapped pointer as needed
+			baseBlock->free=false;
+			baseBlock->offset=AlignUp(baseBlock->offset, memoryRequirements.alignment);
+
+			if(vkZone->mappedPointer)
+				baseBlock->mappedPointer=(void *)((uint8_t *)vkZone->mappedPointer+baseBlock->offset);
 
 #ifdef _DEBUG
-			DBGPRINTF(DEBUG_WARNING, "Vulkan mem allocate block - Location offset: %zu Size: %0.3fKB\n", Base->Offset, (float)Base->Size/1000.0f);
+			DBGPRINTF(DEBUG_WARNING, "Vulkan mem allocate block - Location offset: %zu Size: %0.3fKB\n",
+					  baseBlock->offset, (float)baseBlock->size/1000.0f);
 #endif
-			return Base;
+			return baseBlock;
 		}
 
-		Base=Base->Next;
+		baseBlock=baseBlock->next;
 	}
 
 	DBGPRINTF(DEBUG_WARNING, "Vulkan mem: Unable to find large enough free block.\n");
 	return NULL;
 }
 
-void vkuMem_Print(VkuMemZone_t *VkZone)
+void vkuMem_Print(VkuMemZone_t *vkZone)
 {
-	DBGPRINTF(DEBUG_WARNING, "Vulkan zone size: %0.2fMB  Location: 0x%p (Vulkan Object Address)\n", (float)(VkZone->Size/1000.0f/1000.0f), VkZone->DeviceMemory);
+	DBGPRINTF(DEBUG_WARNING, "Vulkan zone size: %0.2fMB  Location: 0x%p (Vulkan Object Address)\n", (float)(vkZone->size/1000.0f/1000.0f), vkZone->deviceMemory);
 
-	VkuMemBlock_t *Block=VkZone->Blocks;
+	VkuMemBlock_t *block=vkZone->blocks;
 
-	while(Block!=NULL)
+	while(block!=NULL)
 	{
-		DBGPRINTF(DEBUG_WARNING, "\tOffset: %0.4fMB Size: %0.4fMB Block free: %s\n", (float)Block->Offset/1000.0f/1000.0f, (float)Block->Size/1000.0f/1000.0f, Block->Free?"yes":"no");
-		Block=Block->Next;
+		DBGPRINTF(DEBUG_WARNING, "\tOffset: %0.4fMB Size: %0.4fMB Block free: %s\n", (float)block->offset/1000.0f/1000.0f, (float)block->size/1000.0f/1000.0f, block->free?"yes":"no");
+		block=block->next;
 	}
 }

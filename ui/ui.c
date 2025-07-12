@@ -4,109 +4,107 @@
 #include "../system/system.h"
 #include "../vulkan/vulkan.h"
 #include "../perframe.h"
-#include "../utils/genid.h"
 #include "../math/math.h"
+#include "../utils/id.h"
 #include "../utils/list.h"
+#include "../utils/pipeline.h"
 #include "../font/font.h"
+//#include "../vr/vr.h"
 #include "ui.h"
 
 // external Vulkan data and font
-extern VkuContext_t Context;
-extern VkSampleCountFlags MSAA;
-extern VkuSwapchain_t Swapchain;
-extern VkRenderPass RenderPass;
+extern VkuContext_t vkContext;
+extern VkuSwapchain_t swapchain;
+extern VkRenderPass renderPass;
 
-extern Font_t Fnt;
+extern VkuSwapchain_t swapchain;
+//extern XruContext_t xrContext;
+//extern matrix modelView, projection[2], headPose;
 // ---
 
 typedef struct
 {
-	vec4 PositionSize;
-	vec4 ColorValue;
-	uint32_t Type, Pad[3];
+	vec4 positionSize;
+	vec4 colorValue;
+	uint32_t type, pad[3];
 } UI_Instance_t;
 
 static bool UI_VulkanVertex(UI_t *UI)
 {
 	VkuBuffer_t stagingBuffer;
-	void *data=NULL;
 
 	// Create a dummy blank image for binding to descriptor sets when no texture is needed
-	if(!vkuCreateImageBuffer(&Context, &UI->BlankImage,
+	if(!vkuCreateImageBuffer(&vkContext, &UI->blankImage,
 	   VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM, 1, 1, 1, 1, 1,
 	   VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL,
 	   VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 	   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0))
 		return VK_FALSE;
 
-	VkCommandBuffer CommandBuffer=vkuOneShotCommandBufferBegin(&Context);
-	vkuTransitionLayout(CommandBuffer, UI->BlankImage.Image, 1, 0, 1, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-	vkuOneShotCommandBufferEnd(&Context, CommandBuffer);
+	VkCommandBuffer commandBuffer=vkuOneShotCommandBufferBegin(&vkContext);
+	vkuTransitionLayout(commandBuffer, UI->blankImage.image, 1, 0, 1, 0, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	vkuOneShotCommandBufferEnd(&vkContext, commandBuffer);
 
-	vkCreateSampler(Context.Device, &(VkSamplerCreateInfo)
+	vkCreateSampler(vkContext.device, &(VkSamplerCreateInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-			.magFilter=VK_FILTER_NEAREST,
-			.minFilter=VK_FILTER_NEAREST,
-			.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST,
-			.addressModeU=VK_SAMPLER_ADDRESS_MODE_REPEAT,
-			.addressModeV=VK_SAMPLER_ADDRESS_MODE_REPEAT,
-			.addressModeW=VK_SAMPLER_ADDRESS_MODE_REPEAT,
-			.mipLodBias=0.0f,
-			.compareOp=VK_COMPARE_OP_NEVER,
-			.minLod=0.0f,
-			.maxLod=VK_LOD_CLAMP_NONE,
-			.maxAnisotropy=1.0f,
-			.anisotropyEnable=VK_FALSE,
-			.borderColor=VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
-	}, VK_NULL_HANDLE, &UI->BlankImage.Sampler);
-	vkCreateImageView(Context.Device, &(VkImageViewCreateInfo)
+		.magFilter=VK_FILTER_NEAREST,
+		.minFilter=VK_FILTER_NEAREST,
+		.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST,
+		.addressModeU=VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeV=VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.addressModeW=VK_SAMPLER_ADDRESS_MODE_REPEAT,
+		.mipLodBias=0.0f,
+		.compareOp=VK_COMPARE_OP_NEVER,
+		.minLod=0.0f,
+		.maxLod=VK_LOD_CLAMP_NONE,
+		.maxAnisotropy=1.0f,
+		.anisotropyEnable=VK_FALSE,
+		.borderColor=VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE,
+	}, VK_NULL_HANDLE, &UI->blankImage.sampler);
+
+	vkCreateImageView(vkContext.device, &(VkImageViewCreateInfo)
 	{
 		.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-			.image=UI->BlankImage.Image,
-			.viewType=VK_IMAGE_VIEW_TYPE_2D,
-			.format=VK_FORMAT_B8G8R8A8_UNORM,
-			.components={ VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A },
-			.subresourceRange={ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
-	}, VK_NULL_HANDLE, &UI->BlankImage.View);
+		.image=UI->blankImage.image,
+		.viewType=VK_IMAGE_VIEW_TYPE_2D,
+		.format=VK_FORMAT_B8G8R8A8_UNORM,
+		.components={ VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A },
+		.subresourceRange={ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 },
+	}, VK_NULL_HANDLE, &UI->blankImage.imageView);
 	// ---
 
 	// Create static vertex data buffer
-	if(!vkuCreateGPUBuffer(&Context, &UI->VertexBuffer, sizeof(vec4)*4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT))
+	if(!vkuCreateGPUBuffer(&vkContext, &UI->vertexBuffer, sizeof(vec4)*4, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT))
 		return false;
 
 	// Create staging buffer, map it, and copy vertex data to it
-	if(!vkuCreateHostBuffer(&Context, &stagingBuffer, sizeof(vec4)*4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT))
+	if(!vkuCreateHostBuffer(&vkContext, &stagingBuffer, sizeof(vec4)*4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT))
 		return false;
 
 	// Map it
-	if(vkMapMemory(Context.Device, stagingBuffer.DeviceMemory, 0, VK_WHOLE_SIZE, 0, &data)!=VK_SUCCESS)
+	if(!stagingBuffer.memory->mappedPointer)
 		return false;
 
-	if(!data)
-		return false;
+	vec4 *vecPtr=(vec4 *)stagingBuffer.memory->mappedPointer;
 
-	vec4 *Ptr=data;
+	*vecPtr++=Vec4(-0.5f, 0.5f, -1.0f, 1.0f);	// XYUV
+	*vecPtr++=Vec4(-0.5f, -0.5f, -1.0f, -1.0f);
+	*vecPtr++=Vec4(0.5f, 0.5f, 1.0f, 1.0f);
+	*vecPtr++=Vec4(0.5f, -0.5f, 1.0f, -1.0f);
 
-	*Ptr++=Vec4(-0.5f, 0.5f, -1.0f, 1.0f);	// XYUV
-	*Ptr++=Vec4(-0.5f, -0.5f, -1.0f, -1.0f);
-	*Ptr++=Vec4(0.5f, 0.5f, 1.0f, 1.0f);
-	*Ptr++=Vec4(0.5f, -0.5f, 1.0f, -1.0f);
-
-	vkUnmapMemory(Context.Device, stagingBuffer.DeviceMemory);
-
-	VkCommandBuffer CopyCommand=vkuOneShotCommandBufferBegin(&Context);
-	vkCmdCopyBuffer(CopyCommand, stagingBuffer.Buffer, UI->VertexBuffer.Buffer, 1, &(VkBufferCopy) {.srcOffset=0, .dstOffset=0, .size=sizeof(vec4)*4 });
-	vkuOneShotCommandBufferEnd(&Context, CopyCommand);
+	VkCommandBuffer CopyCommand=vkuOneShotCommandBufferBegin(&vkContext);
+	vkCmdCopyBuffer(CopyCommand, stagingBuffer.buffer, UI->vertexBuffer.buffer, 1, &(VkBufferCopy) {.srcOffset=0, .dstOffset=0, .size=sizeof(vec4)*4 });
+	vkuOneShotCommandBufferEnd(&vkContext, CopyCommand);
 
 	// Delete staging data
-	vkuDestroyBuffer(&Context, &stagingBuffer);
+	vkuDestroyBuffer(&vkContext, &stagingBuffer);
 	// ---
 
 	// Create instance buffer and map it
-	vkuCreateHostBuffer(&Context, &UI->InstanceBuffer, sizeof(UI_Instance_t)*UI_HASHTABLE_MAX, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+	vkuCreateHostBuffer(&vkContext, &UI->instanceBuffer, sizeof(UI_Instance_t)*UI_HASHTABLE_MAX, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-	vkMapMemory(Context.Device, UI->InstanceBuffer.DeviceMemory, 0, VK_WHOLE_SIZE, 0, (void *)&UI->InstanceBufferPtr);
+	UI->instanceBufferPtr=UI->instanceBuffer.memory->mappedPointer;
 	// ---
 
 	return true;
@@ -114,63 +112,7 @@ static bool UI_VulkanVertex(UI_t *UI)
 
 static bool UI_VulkanPipeline(UI_t *UI)
 {
-	vkuInitDescriptorSet(&UI->DescriptorSet, &Context);
-	vkuDescriptorSet_AddBinding(&UI->DescriptorSet, 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
-	vkuAssembleDescriptorSetLayout(&UI->DescriptorSet);
-
-	vkCreatePipelineLayout(Context.Device, &(VkPipelineLayoutCreateInfo)
-	{
-		.sType=VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.setLayoutCount=1,
-		.pSetLayouts=&UI->DescriptorSet.DescriptorSetLayout,
-		.pushConstantRangeCount=1,
-		.pPushConstantRanges=&(VkPushConstantRange)
-		{
-			.offset=0,
-			.size=sizeof(vec2),
-			.stageFlags=VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,
-		},		
-	}, 0, &UI->PipelineLayout);
-
-	vkuInitPipeline(&UI->Pipeline, &Context);
-
-	vkuPipeline_SetPipelineLayout(&UI->Pipeline, UI->PipelineLayout);
-	vkuPipeline_SetRenderPass(&UI->Pipeline, RenderPass);
-
-	UI->Pipeline.Topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
-	UI->Pipeline.CullMode=VK_CULL_MODE_BACK_BIT;
-	UI->Pipeline.RasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
-
-	UI->Pipeline.Blend=VK_TRUE;
-	UI->Pipeline.SrcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;
-	UI->Pipeline.DstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-	UI->Pipeline.ColorBlendOp=VK_BLEND_OP_ADD;
-	UI->Pipeline.SrcAlphaBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;
-	UI->Pipeline.DstAlphaBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-	UI->Pipeline.AlphaBlendOp=VK_BLEND_OP_ADD;
-
-	if(!vkuPipeline_AddStage(&UI->Pipeline, "shaders/ui_sdf.vert.spv", VK_SHADER_STAGE_VERTEX_BIT))
-		return false;
-
-	if(!vkuPipeline_AddStage(&UI->Pipeline, "shaders/ui_sdf.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT))
-		return false;
-
-	vkuPipeline_AddVertexBinding(&UI->Pipeline, 0, sizeof(vec4), VK_VERTEX_INPUT_RATE_VERTEX);
-	vkuPipeline_AddVertexAttribute(&UI->Pipeline, 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(vec4)*0);
-
-	vkuPipeline_AddVertexBinding(&UI->Pipeline, 1, sizeof(UI_Instance_t), VK_VERTEX_INPUT_RATE_INSTANCE);
-	vkuPipeline_AddVertexAttribute(&UI->Pipeline, 1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(vec4)*0);
-	vkuPipeline_AddVertexAttribute(&UI->Pipeline, 2, 1, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(vec4)*1);
-	vkuPipeline_AddVertexAttribute(&UI->Pipeline, 3, 1, VK_FORMAT_R32G32B32A32_UINT, sizeof(vec4)*2);
-
-	//VkPipelineRenderingCreateInfo PipelineRenderingCreateInfo=
-	//{
-	//	.sType=VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-	//	.colorAttachmentCount=1,
-	//	.pColorAttachmentFormats=&Swapchain.SurfaceFormat.format,
-	//};
-
-	if(!vkuAssemblePipeline(&UI->Pipeline, VK_NULL_HANDLE/*&PipelineRenderingCreateInfo*/))
+	if(!CreatePipeline(&vkContext, &UI->pipeline, renderPass, "pipelines/ui_sdf.pipeline"))
 		return false;
 
 	UI_VulkanVertex(UI);
@@ -179,21 +121,22 @@ static bool UI_VulkanPipeline(UI_t *UI)
 }
 
 // Initialize UI system.
-bool UI_Init(UI_t *UI, vec2 Position, vec2 Size)
+bool UI_Init(UI_t *UI, vec2 position, vec2 size)
 {
 	if(UI==NULL)
 		return false;
 
-	UI->IDBase=0;
+	//UI->baseID=0;
+	ID_Init(UI->baseID);
 
 	// Set screen width/height
-	UI->Position=Position;
-	UI->Size=Size;
+	UI->position=position;
+	UI->size=size;
 
 	// Initial 10 pre-allocated list of buttons, uninitialized
-	List_Init(&UI->Controls, sizeof(UI_Control_t), 10, NULL);
+	List_Init(&UI->controls, sizeof(UI_Control_t), 10, NULL);
 
-	memset(UI->Controls_Hashtable, 0, sizeof(UI_Control_t *)*UI_HASHTABLE_MAX);
+	memset(UI->controlsHashtable, 0, sizeof(UI_Control_t *)*UI_HASHTABLE_MAX);
 
 	// Vulkan stuff
 	if(!UI_VulkanPipeline(UI))
@@ -204,40 +147,57 @@ bool UI_Init(UI_t *UI, vec2 Position, vec2 Size)
 
 void UI_Destroy(UI_t *UI)
 {
-	List_Destroy(&UI->Controls);
+	// Find any window controls and delete children list, and handle other misc control deletes
+	for(uint32_t i=0;i<List_GetCount(&UI->controls);i++)
+	{
+		UI_Control_t *control=(UI_Control_t *)List_GetPointer(&UI->controls, i);
 
-	if(UI->InstanceBuffer.DeviceMemory)
-		vkUnmapMemory(Context.Device, UI->InstanceBuffer.DeviceMemory);
+		if(control->type==UI_CONTROL_WINDOW)
+			List_Destroy(&control->window.children);
 
-	vkuDestroyBuffer(&Context, &UI->InstanceBuffer);
+		if(control->type==UI_CONTROL_TEXT)
+			Zone_Free(zone, control->text.titleText);
 
-	vkuDestroyBuffer(&Context, &UI->VertexBuffer);
+		if(control->type==UI_CONTROL_EDITTEXT)
+			Zone_Free(zone, control->editText.buffer);
+	}
 
-	vkuDestroyImageBuffer(&Context, &UI->BlankImage);
+	List_Destroy(&UI->controls);
 
-	vkDestroyPipeline(Context.Device, UI->Pipeline.Pipeline, VK_NULL_HANDLE);
-	vkDestroyPipelineLayout(Context.Device, UI->PipelineLayout, VK_NULL_HANDLE);
+	vkuDestroyBuffer(&vkContext, &UI->instanceBuffer);
 
-	vkDestroyDescriptorSetLayout(Context.Device, UI->DescriptorSet.DescriptorSetLayout, VK_NULL_HANDLE);
+	vkuDestroyBuffer(&vkContext, &UI->vertexBuffer);
+
+	vkuDestroyImageBuffer(&vkContext, &UI->blankImage);
+
+	DestroyPipeline(&vkContext, &UI->pipeline);
+}
+
+bool UI_AddControl(UI_t *UI, UI_Control_t *control)
+{
+	// Add control to controls list
+	if(!List_Add(&UI->controls, control))
+		return false;
+
+	// Refresh hashmap pointers, controls list may reallocate and change pointers, so just refresh everything any time a control is added.
+	for(uint32_t i=0;i<List_GetCount(&UI->controls);i++)
+	{
+		UI_Control_t *ptr=(UI_Control_t *)List_GetPointer(&UI->controls, i);
+		UI->controlsHashtable[ptr->ID]=ptr;
+	}
+
+	return true;
 }
 
 UI_Control_t *UI_FindControlByID(UI_t *UI, uint32_t ID)
 {
-	//for(uint32_t i=0;i<List_GetCount(&UI->Controls);i++)
-	//{
-	//	UI_Control_t *Control=(UI_Control_t *)List_GetPointer(&UI->Controls, i);
-
-	//	// Check for matching ID and type
-	//	if(Control->ID==ID)
-	//		return Control;
-	//}
 	if(UI==NULL||ID>=UI_HASHTABLE_MAX||ID==UINT32_MAX)
 		return NULL;
 
-	UI_Control_t *Control=UI->Controls_Hashtable[ID];
+	UI_Control_t *control=UI->controlsHashtable[ID];
 
-	if(Control->ID==ID)
-		return Control;
+	if(control->ID==ID)
+		return control;
 
 	return NULL;
 }
@@ -245,56 +205,74 @@ UI_Control_t *UI_FindControlByID(UI_t *UI, uint32_t ID)
 // Checks hit on UI controls, also processes certain controls, intended to be used on mouse button down events
 // Returns ID of hit, otherwise returns UINT32_MAX
 // Position is the cursor position to test against UI controls
-uint32_t UI_TestHit(UI_t *UI, vec2 Position)
+uint32_t UI_TestHit(UI_t *UI, vec2 position)
 {
 	if(UI==NULL)
 		return UINT32_MAX;
 
-	// Offset by UI position
-	Position=Vec2_Addv(Position, UI->Position);
+	// offset by UI position
+	position=Vec2_Addv(position, UI->position);
 
 	// Loop through all controls in the UI
-	for(uint32_t i=0;i<List_GetCount(&UI->Controls);i++)
+	for(uint32_t i=0;i<List_GetCount(&UI->controls);i++)
 	{
-		UI_Control_t *Control=List_GetPointer(&UI->Controls, i);
+		UI_Control_t *control=List_GetPointer(&UI->controls, i);
 
-		switch(Control->Type)
+		// Only test non-child and visible controls here
+		if(control->childParentID!=UINT32_MAX||control->hidden)
+			continue;
+
+		switch(control->type)
 		{
 			case UI_CONTROL_BUTTON:
 			{
-				if(Position.x>=Control->Position.x&&Position.x<=Control->Position.x+Control->Button.Size.x&&
-				   Position.y>=Control->Position.y&&Position.y<=Control->Position.y+Control->Button.Size.y)
+				if(position.x>=control->position.x&&position.x<=control->position.x+control->button.size.x&&
+					position.y>=control->position.y&&position.y<=control->position.y+control->button.size.y)
 				{
 					// TODO: This could potentionally be an issue if the callback blocks
-					if(Control->Button.Callback)
-						Control->Button.Callback(NULL);
+					if(control->button.callback)
+						control->button.callback(NULL);
 
-					return Control->ID;
+					return control->ID;
 				}
 				break;
 			}
 
 			case UI_CONTROL_CHECKBOX:
 			{
-				vec2 Normal=Vec2_Subv(Control->Position, Position);
-
-				if(Vec2_Dot(Normal, Normal)<=Control->CheckBox.Radius*Control->CheckBox.Radius)
+				if(Vec2_DistanceSq(control->position, position)<=control->checkBox.radius*control->checkBox.radius)
 				{
-					Control->CheckBox.Value=!Control->CheckBox.Value;
-					return Control->ID;
+					control->checkBox.value=!control->checkBox.value;
+					return control->ID;
 				}
 				break;
 			}
 
-			// Only return the ID of this control
 			case UI_CONTROL_BARGRAPH:
 			{
-				if(!Control->BarGraph.Readonly)
+				if(!control->barGraph.readonly)
 				{
 					// If hit inside control area, map hit position to point on bargraph and set the value scaled to the set min and max
-					if(Position.x>=Control->Position.x&&Position.x<=Control->Position.x+Control->BarGraph.Size.x&&
-					   Position.y>=Control->Position.y&&Position.y<=Control->Position.y+Control->BarGraph.Size.y)
-						return Control->ID;
+					if(position.x>=control->position.x&&position.x<=control->position.x+control->barGraph.size.x&&
+						position.y>=control->position.y&&position.y<=control->position.y+control->barGraph.size.y)
+					{
+						control->barGraph.value=((position.x-control->position.x)/control->barGraph.size.x)*(control->barGraph.max-control->barGraph.min)+control->barGraph.min;
+						return control->ID;
+					}
+				}
+				break;
+			}
+
+			case UI_CONTROL_EDITTEXT:
+			{
+				if(!control->editText.readonly)
+				{
+					// If hit inside control area, map hit position to point on bargraph and set the value scaled to the set min and max
+					if(position.x>=control->position.x&&position.x<=control->position.x+control->editText.size.x&&
+					   position.y>=control->position.y&&position.y<=control->position.y+control->editText.size.y)
+					{
+						return control->ID;
+					}
 				}
 				break;
 			}
@@ -304,31 +282,137 @@ uint32_t UI_TestHit(UI_t *UI, vec2 Position)
 
 			case UI_CONTROL_CURSOR:
 				break;
+
+			case UI_CONTROL_WINDOW:
+			{
+				// Hit test children
+				for(uint32_t j=0;j<List_GetCount(&control->window.children);j++)
+				{
+					uint32_t *childID=List_GetPointer(&control->window.children, j);
+					UI_Control_t *child=UI_FindControlByID(UI, *childID);
+
+					if(child->hidden)
+						continue;
+
+					vec2 childPos=Vec2_Addv(control->position, child->position);
+
+					switch(child->type)
+					{
+						case UI_CONTROL_BUTTON:
+						{
+							if(position.x>=childPos.x&&position.x<=childPos.x+child->button.size.x&&
+								position.y>=childPos.y&&position.y<=childPos.y+child->button.size.y)
+							{
+								// TODO: This could potentionally be an issue if the callback blocks
+								if(child->button.callback)
+									child->button.callback(NULL);
+
+								return child->ID;
+							}
+							break;
+						}
+
+						case UI_CONTROL_CHECKBOX:
+						{
+							if(Vec2_DistanceSq(childPos, position)<=child->checkBox.radius*child->checkBox.radius)
+							{
+								child->checkBox.value=!child->checkBox.value;
+								return child->ID;
+							}
+							break;
+						}
+
+						// Only return the ID of this control
+						case UI_CONTROL_BARGRAPH:
+						{
+							if(!child->barGraph.readonly)
+							{
+								// If hit inside control area, map hit position to point on bargraph and set the value scaled to the set min and max
+								if(position.x>=childPos.x&&position.x<=childPos.x+child->barGraph.size.x&&
+									position.y>=childPos.y&&position.y<=childPos.y+child->barGraph.size.y)
+								{
+									child->barGraph.value=((position.x-childPos.x)/child->barGraph.size.x)*(child->barGraph.max-child->barGraph.min)+child->barGraph.min;
+									return child->ID;
+								}
+							}
+							break;
+						}
+
+						case UI_CONTROL_EDITTEXT:
+						{
+							if(!child->editText.readonly)
+							{
+								// If hit inside control area, map hit position to point on bargraph and set the value scaled to the set min and max
+								if(position.x>=childPos.x&&position.x<=childPos.x+child->editText.size.x&&
+								   position.y>=childPos.y&&position.y<=childPos.y+child->editText.size.y)
+								{
+									return child->ID;
+								}
+							}
+							break;
+						}
+
+						default:
+							break;
+					}
+				}
+
+				// Didn't hit on any children, so test the window itself
+				vec2 padding=Vec2(control->window.size.x+UI_CONTROL_WINDOW_BORDER*2.0f, control->window.size.y+UI_CONTROL_WINDOW_BORDER*2.0f+UI_CONTROL_WINDOW_TITLEBAR_HEIGHT);
+
+				// Top-left corner of the whole window area (with borders/title bar)
+				vec2 windowTopLeft=Vec2(control->position.x-UI_CONTROL_WINDOW_BORDER*0.5f, control->position.y+UI_CONTROL_WINDOW_TITLEBAR_HEIGHT);
+
+				// Bottom-left corner (where the actual "window" origin would be if drawn centered vertically)
+				vec2 windowBottomLeft=Vec2(windowTopLeft.x, windowTopLeft.y-padding.y);
+
+				// Hit test against this full rectangle
+				if(position.x>=windowBottomLeft.x&&position.x<=windowBottomLeft.x+padding.x&&
+					position.y>=windowBottomLeft.y&&position.y<=windowBottomLeft.y+padding.y)
+				{
+					control->window.hitOffset=Vec2_Subv(position, control->position);
+					return control->ID;
+				}
+
+				break;
+			}
+
+			default:
+				break;
 		}
 	}
 
-	// Nothing found
+	// Nothing found, empty list
 	return UINT32_MAX;
 }
 
 // Processes hit on certain UI controls by ID (returned by UI_TestHit), intended to be used by "mouse move" events.
 // Returns false on error
 // Position is the cursor position to modify UI controls
-bool UI_ProcessControl(UI_t *UI, uint32_t ID, vec2 Position)
+bool UI_ProcessControl(UI_t *UI, uint32_t ID, vec2 hitPos)
 {
 	if(UI==NULL||ID==UINT32_MAX)
 		return false;
 
-	// Offset by UI position
-	Position=Vec2_Addv(Position, UI->Position);
+	// offset by UI position
+	vec2 position=Vec2_Addv(hitPos, UI->position);
 
 	// Get the control from the ID
-	UI_Control_t *Control=UI_FindControlByID(UI, ID);
+	UI_Control_t *control=UI_FindControlByID(UI, ID);
 
-	if(Control==NULL)
+	// If this control has a parent ID set, then it's a child control
+	//	so we must offset by the parent position
+	//	(subtract, because need to be in "parent" space)
+	if(control->childParentID!=UINT32_MAX)
+	{
+		UI_Control_t *parent=UI_FindControlByID(UI, control->childParentID);
+		position=Vec2_Subv(position, parent->position);
+	}
+
+	if(control==NULL)
 		return false;
 
-	switch(Control->Type)
+	switch(control->type)
 	{
 		case UI_CONTROL_BUTTON:
 			break;
@@ -337,12 +421,12 @@ bool UI_ProcessControl(UI_t *UI, uint32_t ID, vec2 Position)
 			break;
 
 		case UI_CONTROL_BARGRAPH:
-			if(!Control->BarGraph.Readonly)
+			if(!control->barGraph.readonly)
 			{
 				// If hit inside control area, map hit position to point on bargraph and set the value scaled to the set min and max
-				if(Position.x>=Control->Position.x&&Position.x<=Control->Position.x+Control->BarGraph.Size.x&&
-					Position.y>=Control->Position.y&&Position.y<=Control->Position.y+Control->BarGraph.Size.y)
-					Control->BarGraph.Value=((Position.x-Control->Position.x)/Control->BarGraph.Size.x)*(Control->BarGraph.Max-Control->BarGraph.Min)+Control->BarGraph.Min;
+				if(position.x>=control->position.x&&position.x<=control->position.x+control->barGraph.size.x&&
+					position.y>=control->position.y&&position.y<=control->position.y+control->barGraph.size.y)
+					control->barGraph.value=((position.x-control->position.x)/control->barGraph.size.x)*(control->barGraph.max-control->barGraph.min)+control->barGraph.min;
 			}
 			break;
 
@@ -351,239 +435,330 @@ bool UI_ProcessControl(UI_t *UI, uint32_t ID, vec2 Position)
 
 		case UI_CONTROL_CURSOR:
 			break;
+
+		case UI_CONTROL_WINDOW:
+		{
+			control->position=Vec2_Subv(position, control->window.hitOffset);
+			UI_UpdateTextPosition(UI, control->window.titleTextID, Vec2_Add(control->position, 0.0f, 16.0f-(UI_CONTROL_WINDOW_BORDER*0.5f)));
+			break;
+		}
+
+		default:
+			break;
 	}
 
 	return true;
 }
 
-bool UI_Draw(UI_t *UI, uint32_t Index)
+static bool UI_AddControlInstance(UI_Instance_t **instance, uint32_t *instanceCount, UI_Control_t *control, vec2 offset, float dt)
+{
+	switch(control->type)
+	{
+		case UI_CONTROL_BARGRAPH:
+		{
+			const float speed=10.0f;
+			control->barGraph.curValue+=(control->barGraph.value-control->barGraph.curValue)*(1-exp(-speed*dt));
+			float normalize_value=(control->barGraph.curValue-control->barGraph.min)/(control->barGraph.max-control->barGraph.min);
+
+			(*instance)->positionSize.x=offset.x+(control->position.x+control->barGraph.size.x*0.5f);
+			(*instance)->positionSize.y=offset.y+(control->position.y+control->barGraph.size.y*0.5f);
+			(*instance)->positionSize.z=control->barGraph.size.x;
+			(*instance)->positionSize.w=control->barGraph.size.y;
+
+			(*instance)->colorValue.x=control->color.x;
+			(*instance)->colorValue.y=control->color.y;
+			(*instance)->colorValue.z=control->color.z;
+			(*instance)->colorValue.w=normalize_value;
+
+			(*instance)->type=UI_CONTROL_BARGRAPH;
+
+			(*instance)++;
+			(*instanceCount)++;
+
+			return true;
+		}
+
+		case UI_CONTROL_BUTTON:
+		{
+			(*instance)->positionSize.x=offset.x+(control->position.x+control->button.size.x*0.5f);
+			(*instance)->positionSize.y=offset.y+(control->position.y+control->button.size.y*0.5f);
+			(*instance)->positionSize.z=control->button.size.x;
+			(*instance)->positionSize.w=control->button.size.y;
+
+			(*instance)->colorValue.x=control->color.x;
+			(*instance)->colorValue.y=control->color.y;
+			(*instance)->colorValue.z=control->color.z;
+			(*instance)->colorValue.w=0.0f;
+
+			(*instance)->type=UI_CONTROL_BUTTON;
+
+			(*instance)++;
+			(*instanceCount)++;
+
+			return true;
+		}
+
+		case UI_CONTROL_CHECKBOX:
+		{
+			(*instance)->positionSize.x=offset.x+control->position.x;
+			(*instance)->positionSize.y=offset.y+control->position.y;
+			(*instance)->positionSize.z=control->checkBox.radius*2;
+			(*instance)->positionSize.w=control->checkBox.radius*2;
+
+			(*instance)->colorValue.x=control->color.x;
+			(*instance)->colorValue.y=control->color.y;
+			(*instance)->colorValue.z=control->color.z;
+
+			if(control->checkBox.value)
+				(*instance)->colorValue.w=1.0f;
+			else
+				(*instance)->colorValue.w=0.0f;
+
+			(*instance)->type=UI_CONTROL_CHECKBOX;
+
+			(*instance)++;
+			(*instanceCount)++;
+
+			return true;
+		}
+
+		case UI_CONTROL_CURSOR:
+		{
+			(*instance)->positionSize.x=offset.x+(control->position.x+control->cursor.radius);
+			(*instance)->positionSize.y=offset.y+(control->position.y-control->cursor.radius);
+			(*instance)->positionSize.z=control->cursor.radius*2;
+			(*instance)->positionSize.w=control->cursor.radius*2;
+
+			(*instance)->colorValue.x=control->color.x;
+			(*instance)->colorValue.y=control->color.y;
+			(*instance)->colorValue.z=control->color.z;
+			(*instance)->colorValue.w=0.0f;
+
+			(*instance)->type=UI_CONTROL_CURSOR;
+
+			(*instance)++;
+			(*instanceCount)++;
+
+			return true;
+		}
+
+		case UI_CONTROL_EDITTEXT:
+		{
+			(*instance)->positionSize.x=offset.x+(control->position.x+control->editText.size.x*0.5f);
+			(*instance)->positionSize.y=offset.y+(control->position.y+control->editText.size.y*0.5f);
+			(*instance)->positionSize.z=control->editText.size.x;
+			(*instance)->positionSize.w=control->editText.size.y;
+
+			(*instance)->colorValue.x=control->color.x;
+			(*instance)->colorValue.y=control->color.y;
+			(*instance)->colorValue.z=control->color.z;
+			(*instance)->colorValue.w=0.0f;
+
+			(*instance)->type=UI_CONTROL_EDITTEXT;
+
+			(*instance)++;
+			(*instanceCount)++;
+
+			return true;
+		}
+
+		case UI_CONTROL_WINDOW:
+		{
+			(*instance)->positionSize.x=offset.x+((control->position.x-(UI_CONTROL_WINDOW_BORDER*0.5f))+(control->window.size.x+UI_CONTROL_WINDOW_BORDER)*0.5f);
+			(*instance)->positionSize.y=offset.y+((control->position.y-((UI_CONTROL_WINDOW_BORDER-UI_CONTROL_WINDOW_TITLEBAR_HEIGHT)*0.5f))-(control->window.size.y-UI_CONTROL_WINDOW_BORDER)*0.5f);
+			(*instance)->positionSize.z=control->window.size.x+(UI_CONTROL_WINDOW_BORDER*2.0f);
+			(*instance)->positionSize.w=control->window.size.y+(UI_CONTROL_WINDOW_BORDER*2.0f)+UI_CONTROL_WINDOW_TITLEBAR_HEIGHT;
+
+			(*instance)->colorValue.x=control->color.x;
+			(*instance)->colorValue.y=control->color.y;
+			(*instance)->colorValue.z=control->color.z;
+			(*instance)->colorValue.w=0.0f;
+
+			(*instance)->type=UI_CONTROL_WINDOW;
+
+			(*instance)++;
+			(*instanceCount)++;
+
+			return true;
+		}
+
+		case UI_CONTROL_TEXT:
+		{
+			if(control->text.titleText==NULL)
+				return false;
+
+			const float sx=offset.x+control->position.x;
+			float x=sx;
+			float y=offset.y+control->position.y;
+			vec3 color=control->color;
+
+			// Loop through the text string until EOL
+			for(char *ptr=control->text.titleText;*ptr!='\0';ptr++)
+			{
+				// Decrement 'y' for any CR's
+				if(*ptr=='\n')
+				{
+					x=sx;
+					y-=control->text.size;
+					continue;
+				}
+
+				// Just advance spaces instead of rendering empty quads
+				if(*ptr==' ')
+				{
+					x+=Font_CharacterBaseWidth(*ptr)*control->text.size;
+					continue;
+				}
+
+				// ANSI color escape codes
+				if(*ptr=='\x1B')
+				{
+					ptr++;
+						 if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='0'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=0.0f; color.z=0.0f; ptr+=4; } // BLACK
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='1'&&*(ptr+3)=='m')	{ color.x=0.5f; color.y=0.0f; color.z=0.0f; ptr+=4; } // DARK RED
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='2'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=0.5f; color.z=0.0f; ptr+=4; } // DARK GREEN
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='3'&&*(ptr+3)=='m')	{ color.x=0.5f; color.y=0.5f; color.z=0.0f; ptr+=4; } // DARK YELLOW
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='4'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=0.0f; color.z=0.5f; ptr+=4; } // DARK BLUE
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='5'&&*(ptr+3)=='m')	{ color.x=0.5f; color.y=0.0f; color.z=0.5f; ptr+=4; } // DARK MAGENTA
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='6'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=0.5f; color.z=0.5f; ptr+=4; } // DARK CYAN
+					else if(*(ptr+0)=='['&&*(ptr+1)=='3'&&*(ptr+2)=='7'&&*(ptr+3)=='m')	{ color.x=0.5f; color.y=0.5f; color.z=0.5f; ptr+=4; } // GREY
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='0'&&*(ptr+3)=='m')	{ color.x=0.5f; color.y=0.5f; color.z=0.5f; ptr+=4; } // GREY
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='1'&&*(ptr+3)=='m')	{ color.x=1.0f; color.y=0.0f; color.z=0.0f; ptr+=4; } // RED
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='2'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=1.0f; color.z=0.0f; ptr+=4; } // GREEN
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='3'&&*(ptr+3)=='m')	{ color.x=1.0f; color.y=1.0f; color.z=0.0f; ptr+=4; } // YELLOW
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='4'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=0.0f; color.z=1.0f; ptr+=4; } // BLUE
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='5'&&*(ptr+3)=='m')	{ color.x=1.0f; color.y=0.0f; color.z=1.0f; ptr+=4; } // MAGENTA
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='6'&&*(ptr+3)=='m')	{ color.x=0.0f; color.y=1.0f; color.z=1.0f; ptr+=4; } // CYAN
+					else if(*(ptr+0)=='['&&*(ptr+1)=='9'&&*(ptr+2)=='7'&&*(ptr+3)=='m')	{ color.x=1.0f; color.y=1.0f; color.z=1.0f; ptr+=4; } // WHITE
+					else if(*(ptr+0)=='['&&*(ptr+1)=='0'&&*(ptr+2)=='m')				{ color=control->color; ptr+=3; }					  // CANCEL COLOR
+				}
+
+				// Advance one character
+				x+=Font_CharacterBaseWidth(*ptr)*control->text.size;
+
+				(*instance)->positionSize.x=x-((Font_CharacterBaseWidth(*ptr)*0.5f)*control->text.size); // TODO: SDF render is centered X/Y, this offsets by half
+				(*instance)->positionSize.y=y;
+				(*instance)->positionSize.z=(float)(*ptr);
+				(*instance)->positionSize.w=control->text.size;
+
+				(*instance)->colorValue=Vec4_Vec3(color, 0.0f);
+
+				(*instance)->type=UI_CONTROL_TEXT;
+
+				(*instance)++;
+				(*instanceCount)++;
+			}
+
+			return true;
+		}
+
+		case UI_CONTROL_SPRITE:
+		default:
+			return false;
+	}	
+}
+
+bool UI_Draw(UI_t *UI, uint32_t index, uint32_t eye, float dt)
 {
 	if(UI==NULL)
 		return false;
 
-	UI_Instance_t *Instance=(UI_Instance_t *)UI->InstanceBufferPtr;
+	UI_Instance_t *instance=(UI_Instance_t *)UI->instanceBufferPtr;
 	uint32_t instanceCount=0;
 
-	const size_t controlCount=List_GetCount(&UI->Controls);
+	const size_t controlCount=List_GetCount(&UI->controls);
 
 	// Build a list of instanceable UI controls
 	for(uint32_t i=0;i<controlCount;i++)
 	{
-		UI_Control_t *Control=List_GetPointer(&UI->Controls, i);
+		UI_Control_t *control=List_GetPointer(&UI->controls, i);
 
-		switch(Control->Type)
+		// Only add controls that are non-child and visible controls
+		if(control->childParentID!=UINT32_MAX||control->hidden)
+			continue;
+
+		UI_AddControlInstance(&instance, &instanceCount, control, Vec2b(0.0f), dt);
+
+		// If it was a window control, add children control instances
+		if(control->type==UI_CONTROL_WINDOW)
 		{
-			case UI_CONTROL_BUTTON:
+			for(uint32_t j=0;j<List_GetCount(&control->window.children);j++)
 			{
-				// Get base length of title text
-				float textlen=Font_StringBaseWidth(Control->Button.TitleText);
+				uint32_t *childID=List_GetPointer(&control->window.children, j);
+				UI_Control_t *child=UI_FindControlByID(UI, *childID);
 
-				// Scale text size based on the button size and length of text, but no bigger than 80% of button height
-				float TextSize=min(Control->Button.Size.x/textlen*0.8f, Control->Button.Size.y*0.8f);
-
-				// Print the text centered
-				Font_Print(&Fnt,
-						   TextSize,
-						   Control->Position.x-(textlen*TextSize)*0.5f+Control->BarGraph.Size.x*0.5f,
-						   Control->Position.y-(TextSize*0.5f)+(Control->BarGraph.Size.y*0.5f),
-						   "%s", Control->BarGraph.TitleText);
-
-				// Left justified
-				//Font_Print(&Font,
-				//	TextSize,
-				//	Control->Position.x,
-				//	Control->Position.y-(TextSize*0.5f)+Control->BarGraph.Size.y*0.5f,
-				//	"%s", Control->BarGraph.TitleText
-				//);
-
-				// right justified
-				//Font_Print(&Font,
-				//	TextSize,
-				//	Control->Position.x-(textlen*TextSize)+Control->BarGraph.Size.x,
-				//	Control->Position.y-(TextSize*0.5f)+Control->BarGraph.Size.y*0.5f,
-				//	"%s", Control->BarGraph.TitleText
-				//);
-
-				Instance->PositionSize.x=Control->Position.x+Control->Button.Size.x*0.5f;
-				Instance->PositionSize.y=Control->Position.y+Control->Button.Size.y*0.5f;
-				Instance->PositionSize.z=Control->Button.Size.x;
-				Instance->PositionSize.w=Control->Button.Size.y;
-
-				Instance->ColorValue.x=Control->Color.x;
-				Instance->ColorValue.y=Control->Color.y;
-				Instance->ColorValue.z=Control->Color.z;
-				Instance->ColorValue.w=0.0f;
-
-				Instance->Type=UI_CONTROL_BUTTON;
-				Instance++;
-				instanceCount++;
-				break;
+				// Add child control instances with offset of parent control, but only if visible
+				if(!child->hidden)
+					UI_AddControlInstance(&instance, &instanceCount, child, control->position, dt);
 			}
-
-			case UI_CONTROL_CHECKBOX:
-			{
-				// Text size is the radius of the checkbox, placed radius length away horizontally, centered vertically
-				Font_Print(&Fnt,
-						   Control->CheckBox.Radius,
-						   Control->Position.x+Control->CheckBox.Radius,
-						   Control->Position.y-(Control->CheckBox.Radius/2.0f),
-						   "%s", Control->CheckBox.TitleText);
-
-				Instance->PositionSize.x=Control->Position.x;
-				Instance->PositionSize.y=Control->Position.y;
-				Instance->PositionSize.z=Control->CheckBox.Radius*2;
-				Instance->PositionSize.w=Control->CheckBox.Radius*2;
-
-				Instance->ColorValue.x=Control->Color.x;
-				Instance->ColorValue.y=Control->Color.y;
-				Instance->ColorValue.z=Control->Color.z;
-
-				if(Control->CheckBox.Value)
-					Instance->ColorValue.w=1.0f;
-				else
-					Instance->ColorValue.w=0.0f;
-
-				Instance->Type=UI_CONTROL_CHECKBOX;
-				Instance++;
-				instanceCount++;
-				break;
-			}
-
-			case UI_CONTROL_BARGRAPH:
-			{
-				// Get base length of title text
-				float textlen=Font_StringBaseWidth(Control->BarGraph.TitleText);
-
-				// Scale text size based on the button size and length of text, but no bigger than 80% of button height
-				float TextSize=min(Control->BarGraph.Size.x/textlen*0.8f, Control->BarGraph.Size.y*0.8f);
-
-				// Print the text centered
-				Font_Print(&Fnt,
-						   TextSize,
-						   Control->Position.x-(textlen*TextSize)*0.5f+Control->BarGraph.Size.x*0.5f,
-						   Control->Position.y-(TextSize*0.5f)+(Control->BarGraph.Size.y*0.5f),
-						   "%s", Control->BarGraph.TitleText);
-
-				// Left justified
-				//Font_Print(
-				//	TextSize,
-				//	Control->Position.x,
-				//	Control->Position.y-(TextSize*0.5f)+Control->BarGraph.Size.y*0.5f,
-				//	"%s", Control->BarGraph.TitleText
-				//);
-
-				// right justified
-				//Font_Print(
-				//	TextSize,
-				//	Control->Position.x-(textlen*TextSize)+Control->BarGraph.Size.x,
-				//	Control->Position.y-(TextSize*0.5f)+Control->BarGraph.Size.y*0.5f,
-				//	"%s", Control->BarGraph.TitleText
-				//);
-
-				float normalize_value=(Control->BarGraph.Value-Control->BarGraph.Min)/(Control->BarGraph.Max-Control->BarGraph.Min);
-
-				Instance->PositionSize.x=Control->Position.x+Control->BarGraph.Size.x*0.5f;
-				Instance->PositionSize.y=Control->Position.y+Control->BarGraph.Size.y*0.5f;
-				Instance->PositionSize.z=Control->BarGraph.Size.x;
-				Instance->PositionSize.w=Control->BarGraph.Size.y;
-
-				Instance->ColorValue.x=Control->Color.x;
-				Instance->ColorValue.y=Control->Color.y;
-				Instance->ColorValue.z=Control->Color.z;
-				Instance->ColorValue.w=normalize_value;
-
-				Instance->Type=UI_CONTROL_BARGRAPH;
-				Instance++;
-				instanceCount++;
-				break;
-			}
-
-			case UI_CONTROL_SPRITE:
-				break;
-
-			case UI_CONTROL_CURSOR:
-			{
-				Instance->PositionSize.x=Control->Position.x+Control->Cursor.Radius;
-				Instance->PositionSize.y=Control->Position.y-Control->Cursor.Radius;
-				Instance->PositionSize.z=Control->Cursor.Radius*2;
-				Instance->PositionSize.w=Control->Cursor.Radius*2;
-
-				Instance->ColorValue.x=Control->Color.x;
-				Instance->ColorValue.y=Control->Color.y;
-				Instance->ColorValue.z=Control->Color.z;
-				Instance->ColorValue.w=0.0f;
-
-				Instance->Type=UI_CONTROL_CURSOR;
-				Instance++;
-				instanceCount++;
-				break;
-			}
-		}
-	}
-
-	// At the end of the instance buffer, build a list of non-instanced UI controls
-	for(uint32_t i=0;i<controlCount;i++)
-	{
-		UI_Control_t *Control=List_GetPointer(&UI->Controls, i);
-
-		if(Control->Type==UI_CONTROL_SPRITE)
-		{
-			Instance->PositionSize.x=Control->Position.x;
-			Instance->PositionSize.y=Control->Position.y;
-			Instance->PositionSize.z=Control->Sprite.Size.x;
-			Instance->PositionSize.w=Control->Sprite.Size.y;
-
-			Instance->ColorValue.x=Control->Color.x;
-			Instance->ColorValue.y=Control->Color.y;
-			Instance->ColorValue.z=Control->Color.z;
-			Instance->ColorValue.w=Control->Sprite.Rotation;
-
-			Instance->Type=UI_CONTROL_SPRITE;
-			Instance++;
 		}
 	}
 
 	// Flush instance buffer caches, mostly needed for Android and maybe some iGPUs
-	vkFlushMappedMemoryRanges(Context.Device, 1, &(VkMappedMemoryRange)
+	vkFlushMappedMemoryRanges(vkContext.device, 1, &(VkMappedMemoryRange)
 	{
 		VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
 		VK_NULL_HANDLE,
-		UI->InstanceBuffer.DeviceMemory,
+		UI->instanceBuffer.memory->deviceMemory,
 		0, VK_WHOLE_SIZE
 	});
 
-	vkCmdBindPipeline(PerFrame[Index].CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UI->Pipeline.Pipeline);
+	vkCmdBindPipeline(perFrame[index].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UI->pipeline.pipeline.pipeline);
 
 	// Bind vertex data buffer
-	vkCmdBindVertexBuffers(PerFrame[Index].CommandBuffer, 0, 1, &UI->VertexBuffer.Buffer, &(VkDeviceSize) { 0 });
+	vkCmdBindVertexBuffers(perFrame[index].commandBuffer, 0, 1, &UI->vertexBuffer.buffer, &(VkDeviceSize) { 0 });
 	// Bind object instance buffer
-	vkCmdBindVertexBuffers(PerFrame[Index].CommandBuffer, 1, 1, &UI->InstanceBuffer.Buffer, &(VkDeviceSize) { 0 });
+	vkCmdBindVertexBuffers(perFrame[index].commandBuffer, 1, 1, &UI->instanceBuffer.buffer, &(VkDeviceSize) { 0 });
 
-	vkCmdPushConstants(PerFrame[Index].CommandBuffer, UI->PipelineLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(vec2), &UI->Size);
+	struct
+	{
+		vec2 viewport;
+		vec2 pad;
+		matrix mvp;
+	} UIPC;
+
+	UIPC.viewport=UI->size;
+	UIPC.mvp=MatrixScale(1.0f, -1.0f, 1.0f);
+
+	vkCmdPushConstants(perFrame[index].commandBuffer, UI->pipeline.pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(UIPC), &UIPC);
 
 	// Draw sprites, they need descriptor set changes and aren't easy to draw instanced...
 	uint32_t spriteCount=instanceCount;
 	for(uint32_t i=0;i<controlCount;i++)
 	{
-		UI_Control_t *Control=List_GetPointer(&UI->Controls, i);
+		UI_Control_t *control=List_GetPointer(&UI->controls, i);
 
-		if(Control->Type==UI_CONTROL_SPRITE)
+		if(control->type==UI_CONTROL_SPRITE&&!control->hidden)
 		{
-			vkuDescriptorSet_UpdateBindingImageInfo(&UI->DescriptorSet, 0, Control->Sprite.Image);
-			vkuAllocateUpdateDescriptorSet(&UI->DescriptorSet, PerFrame[Index].DescriptorPool);
-			vkCmdBindDescriptorSets(PerFrame[Index].CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UI->PipelineLayout, 0, 1, &UI->DescriptorSet.DescriptorSet, 0, VK_NULL_HANDLE);
+			// TODO: This may be a problem on integrated or mobile platforms, flush needed?
+			instance->positionSize.x=control->position.x;
+			instance->positionSize.y=control->position.y;
+			instance->positionSize.z=control->sprite.size.x;
+			instance->positionSize.w=control->sprite.size.y;
+
+			instance->colorValue.x=control->color.x;
+			instance->colorValue.y=control->color.y;
+			instance->colorValue.z=control->color.z;
+			instance->colorValue.w=control->sprite.rotation;
+
+			instance->type=UI_CONTROL_SPRITE;
+			instance++;
+
+			vkuDescriptorSet_UpdateBindingImageInfo(&UI->pipeline.descriptorSet, 0, control->sprite.image->sampler, control->sprite.image->imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			vkuAllocateUpdateDescriptorSet(&UI->pipeline.descriptorSet, perFrame[index].descriptorPool);
+			vkCmdBindDescriptorSets(perFrame[index].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UI->pipeline.pipelineLayout, 0, 1, &UI->pipeline.descriptorSet.descriptorSet, 0, VK_NULL_HANDLE);
 
 			// Use the last unused instanced data slot for drawing
-			vkCmdDraw(PerFrame[Index].CommandBuffer, 4, 1, 0, spriteCount++);
+			vkCmdDraw(perFrame[index].commandBuffer, 4, 1, 0, spriteCount++);
 		}
 	}
 
-	vkuDescriptorSet_UpdateBindingImageInfo(&UI->DescriptorSet, 0, &UI->BlankImage);
-	vkuAllocateUpdateDescriptorSet(&UI->DescriptorSet, PerFrame[Index].DescriptorPool);
-	vkCmdBindDescriptorSets(PerFrame[Index].CommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UI->PipelineLayout, 0, 1, &UI->DescriptorSet.DescriptorSet, 0, VK_NULL_HANDLE);
+	vkuDescriptorSet_UpdateBindingImageInfo(&UI->pipeline.descriptorSet, 0, UI->blankImage.sampler, UI->blankImage.imageView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	vkuAllocateUpdateDescriptorSet(&UI->pipeline.descriptorSet, perFrame[index].descriptorPool);
+	vkCmdBindDescriptorSets(perFrame[index].commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, UI->pipeline.pipelineLayout, 0, 1, &UI->pipeline.descriptorSet.descriptorSet, 0, VK_NULL_HANDLE);
 
 	// Draw instanced UI elements
-	vkCmdDraw(PerFrame[Index].CommandBuffer, 4, instanceCount, 0, 0);
+	vkCmdDraw(perFrame[index].commandBuffer, 4, instanceCount, 0, 0);
 
 	return true;
 }

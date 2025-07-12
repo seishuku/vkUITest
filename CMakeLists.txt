@@ -3,7 +3,7 @@
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED True)
 
-project("vkEngine" LANGUAGES C VERSION 0.0.5)
+project("vkUITest" LANGUAGES C VERSION 0.0.1)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include("fetchDeps")
@@ -99,10 +99,10 @@ install(FILES config.ini README.md LICENSE DESTINATION .)
 
 include(InstallRequiredSystemLibraries)
 
-set(CPACK_PACKAGE_NAME "vkEngine")
+set(CPACK_PACKAGE_NAME ${CMAKE_PROJECT_NAME})
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_CONTACT "nitrogl@gmail.com")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "vkEngine - Not a demo, demo.")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "vkUITest")
 set(CPACK_PACKAGE_VENDOR "NitroGL")
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
